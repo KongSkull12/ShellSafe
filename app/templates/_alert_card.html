@@ -1,0 +1,57 @@
+{% set level_config = {
+    'Critical': {'color': 'danger', 'icon': 'exclamation-triangle-fill'},
+    'High': {'color': 'danger', 'icon': 'exclamation-triangle-fill'},
+    'Moderate': {'color': 'warning', 'icon': 'exclamation-triangle-fill'},
+    'Low': {'color': 'success', 'icon': 'check-circle-fill'},
+    'Warning': {'color': 'warning', 'icon': 'exclamation-triangle-fill'}
+} %}
+
+{% set type_config = {
+    'RISK': {'name': 'RISK', 'color': 'secondary'},
+    'BATTERY': {'name': 'BATTERY', 'color': 'primary'},
+    'DEVICE_OFFLINE': {'name': 'DEVICE OFFLINE', 'color': 'info'},
+    'DISCONNECTION': {'name': 'DISCONNECTION', 'color': 'info'}
+} %}
+
+{% set current_level = level_config.get(alert.alert_level, {'color': 'secondary', 'icon': 'question-circle-fill'}) %}
+{% set current_type = type_config.get(alert.alert_type, {'name': 'UNKNOWN', 'color': 'dark'}) %}
+
+<div class="card alert-card alert-card-{{ alert.alert_level }} mb-3 shadow-sm {% if alert.status == 'Unread' %}alert-unread{% endif %}">
+    <div class="card-body">
+        <div class="d-flex align-items-start">
+            <!-- Icon -->
+            <div class="alert-icon me-3">
+                <div class="icon-circle icon-circle-{{ current_level.color }}">
+                    <i class="bi bi-{{ current_level.icon }}"></i>
+                </div>
+            </div>
+
+            <!-- Alert Content -->
+            <div class="flex-grow-1">
+                <h5 class="alert-title mb-1">{{ alert.alert_title }}</h5>
+                <p class="alert-message mb-2 text-muted">{{ alert.alert_message }}</p>
+                <div class="alert-meta text-muted small">
+                    <span><i class="bi bi-clock"></i> {{ alert.created_at.strftime('%b %d, %Y %I:%M %p') }}</span> &bull;
+                    <span class="fw-bold">{{ current_type.name }}</span> &bull;
+                    <span>{{ alert.status }}</span>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="ms-auto d-flex">
+                {% if alert.status == 'Unread' %}
+                <form action="{{ url_for('main.mark_read', alert_id=alert.alert_id) }}" method="POST" class="me-2">
+                    <button type="submit" class="btn btn-sm btn-light border" title="Mark as Read">
+                        <i class="bi bi-check-lg"></i>
+                    </button>
+                </form>
+                {% endif %}
+                <form action="{{ url_for('main.delete_alert', alert_id=alert.alert_id) }}" method="POST">
+                    <button type="submit" class="btn btn-sm btn-light border" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

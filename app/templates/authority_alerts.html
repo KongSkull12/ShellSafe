@@ -1,0 +1,56 @@
+{% extends "authority_base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h4 mb-0"><i class="bi bi-bell-fill me-2"></i>Alert Center</h2>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <!-- Filter Tabs -->
+    <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="pills-all-tab" data-bs-toggle="pill" data-bs-target="#pills-all" type="button" role="tab" aria-controls="pills-all" aria-selected="true">All Alerts</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="pills-unread-tab" data-bs-toggle="pill" data-bs-target="#pills-unread" type="button" role="tab" aria-controls="pills-unread" aria-selected="false">Unread</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="pills-risk-tab" data-bs-toggle="pill" data-bs-target="#pills-risk" type="button" role="tab" aria-controls="pills-risk" aria-selected="false">Risk Alerts</button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="pills-tabContent">
+        <div class="tab-pane fade show active" id="pills-all" role="tabpanel" aria-labelledby="pills-all-tab">
+            {% for alert in alerts %}
+                {% include '_alert_card.html' %}
+            {% else %}
+                <p>No alerts found.</p>
+            {% endfor %}
+        </div>
+        <div class="tab-pane fade" id="pills-unread" role="tabpanel" aria-labelledby="pills-unread-tab">
+            {% for alert in alerts if alert.status == 'Unread' %}
+                {% include '_alert_card.html' %}
+            {% else %}
+                <p>No unread alerts.</p>
+            {% endfor %}
+        </div>
+        <div class="tab-pane fade" id="pills-risk" role="tabpanel" aria-labelledby="pills-risk-tab">
+            {% for alert in alerts if alert.alert_type == 'RISK' %}
+                {% include '_alert_card.html' %}
+            {% else %}
+                <p>No risk alerts.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

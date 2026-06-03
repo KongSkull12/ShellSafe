@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-lg-10 offset-lg-1 text-center">
+            <h2 class="mb-4">About ShellSafe</h2>
+            <p class="lead">
+                ShellSafe is an IoT-Based Real-Time Algal Bloom Detection and Predictive Analytics System designed to monitor coastal water quality and identify environmental conditions associated with harmful algal blooms. By integrating smart sensors, real-time monitoring, predictive analytics, and automated alerts, ShellSafe helps authorities make informed decisions for coastal water management and environmental protection.
+            </p>
+        </div>
+    </div>
+
+    <hr class="my-5">
+
+    <div class="row text-center">
+        <div class="col">
+            <h2 class="mb-2">Meet the Team</h2>
+            <p class="lead mb-5">The passionate individuals behind the development of ShellSafe.</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card team-card h-100">
+                <div class="card-body text-center">
+                    <img src="{{ url_for('static', filename='img/Mikyla Cabillo (2).png') }}" class="img-fluid rounded-circle team-photo mb-3" id="mikyla-photo" alt="Mikyla Erica P. Cabillo">
+                    <h5 class="card-title">Mikyla Erica P. Cabillo</h5>
+                    <p class="card-text text-muted">System Analyst</p>
+                    <p class="card-text">Responsible for system planning, requirements analysis, and ensuring the project meets user and technical requirements.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card team-card h-100">
+                <div class="card-body text-center">
+                    <img src="{{ url_for('static', filename='img/allen bontilao.jpg') }}" class="img-fluid rounded-circle team-photo mb-3" alt="Allen M. Bontilao">
+                    <h5 class="card-title">Allen M. Bontilao</h5>
+                    <p class="card-text text-muted">Programmer</p>
+                    <p class="card-text">Responsible for system development, coding, database integration, and implementation of the ShellSafe platform.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card team-card h-100">
+                <div class="card-body text-center">
+                    <img src="{{ url_for('static', filename='img/marjorie casilao.jpg') }}" class="img-fluid rounded-circle team-photo mb-3" alt="Marjorie Casilao">
+                    <h5 class="card-title">Marjorie Casilao</h5>
+                    <p class="card-text text-muted">Documentarian</p>
+                    <p class="card-text">Responsible for project documentation, technical writing, and organizing research and project records.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

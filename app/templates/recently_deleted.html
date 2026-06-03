@@ -1,0 +1,56 @@
+{% extends "dashboard_base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h4 mb-0"><i class="bi bi-trash-fill me-2"></i>Recently Deleted Alerts</h2>
+            <p class="text-muted mb-0">Review and manage alerts that have been recently deleted.</p>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% if alerts %}
+        {% for alert in alerts %}
+        <div class="card alert-card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <h5 class="mb-1">{{ alert.alert_title }}</h5>
+                            <p class="mb-1 text-muted small">{{ alert.alert_message }}</p>
+                            <p class="mb-0 text-muted small">
+                                <em>Originally created: {{ alert.created_at.strftime('%b %d, %Y %I:%M %p') }}{% if alert.deleted_at %} | Deleted: {{ alert.deleted_at.strftime('%b %d, %Y %I:%M %p') }}{% endif %}</em>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <form action="{{ url_for('main.restore_alert', alert_id=alert.alert_id) }}" method="POST" class="me-2">
+                            <button type="submit" class="btn btn-sm btn-outline-success">
+                                <i class="bi bi-arrow-counterclockwise"></i> Restore
+                            </button>
+                        </form>
+                        <form action="{{ url_for('main.delete_permanently', alert_id=alert.alert_id) }}" method="POST">
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to permanently delete this alert?');">
+                                <i class="bi bi-x-circle-fill"></i> Delete Permanently
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="text-center p-5">
+            <p class="text-muted">There are no recently deleted alerts.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

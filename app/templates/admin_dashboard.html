@@ -1,0 +1,437 @@
+{% extends "dashboard_base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Dashboard Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h4 mb-0">Algal Bloom Monitoring Dashboard</h2>
+            <p class="text-muted mb-0">Real-Time Coastal Water Monitoring System</p>
+        </div>
+        <div class="text-end">
+            <div class="card shadow-sm {{ risk_assessment.card_bg }} {{ risk_assessment.card_class }}" id="riskLevelCard">
+                <div class="card-body p-2">
+                    <h6 class="card-title small mb-0">Current Risk Level</h6>
+                    <p class="card-text fw-bold mb-0" id="riskLevelBadge">{{ risk_assessment.overall_label | upper }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sensor Charts Grid -->
+    <div class="row">
+        <!-- Temperature Chart -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title small text-muted">Temperature (°C)</h5>
+                    <div style="height: 250px;">
+                        <canvas id="tempChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- pH Level Chart -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title small text-muted">pH Level</h5>
+                    <div style="height: 250px;">
+                        <canvas id="phChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Salinity Chart -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title small text-muted">Salinity (ppt)</h5>
+                    <div style="height: 250px;">
+                        <canvas id="salinityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Turbidity Chart -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title small text-muted">Turbidity (NTU)</h5>
+                    <div style="height: 250px;">
+                        <canvas id="turbidityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Dissolved Oxygen Chart -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title small text-muted">Dissolved Oxygen (mg/L)</h5>
+                    <div style="height: 250px;">
+                        <canvas id="oxygenChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Overall Water Status -->
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center d-flex flex-column justify-content-center">
+                    <h5 class="card-title small text-muted">Overall Water Status</h5>
+                    <div class="mx-auto my-3">
+                        <div class="{{ risk_assessment.dial_class }}" id="riskDial">
+                            <span class="risk-dial-label">Risk Level</span>
+                            <span class="risk-dial-value" id="riskDialValue">{{ risk_assessment.overall_label.split()[0] | upper }}</span>
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-2" id="riskMessage">{{ risk_assessment.message }}</p>
+                    <div id="riskTriggeredList" class="small text-start px-2">
+                        {% if risk_assessment.triggered %}
+                            {% for param in risk_assessment.triggered %}
+                            <div class="d-flex justify-content-between border-bottom py-1">
+                                <span>{{ param.name }}</span>
+                                <span class="fw-bold text-{{ 'danger' if param.level == 'high' else 'warning' }}">{{ param.label }}</span>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-success mb-0 text-center">All active sensors within normal range.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sensor Summary Table -->
+    <div class="card">
+        <div class="card-header">
+            Sensor Summary Table (08:00 - 12:00)
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Temperature</th>
+                            <th>pH</th>
+                            <th>Salinity</th>
+                            <th>Turbidity</th>
+                            <th>Dissolved Oxygen (mg/L)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if latest_sensor %}
+                        <tr id="sensorSummaryRow">
+                            <td id="sensorSummaryTime">Latest</td>
+                            <td id="sensorSummaryTemp">{{ '%.1f'|format(latest_sensor.temperature) if latest_sensor.temperature is not none else '—' }} °C</td>
+                            <td id="sensorSummaryPh">{{ '%.1f'|format(latest_sensor.ph) if latest_sensor.ph is not none else '—' }}</td>
+                            <td id="sensorSummarySalinity">{{ latest_sensor.salinity if latest_sensor.salinity is not none else '—' }}{% if latest_sensor.salinity is not none %} ppt{% endif %}</td>
+                            <td id="sensorSummaryTurbidity">{{ '%.1f'|format(latest_sensor.turbidity) if latest_sensor.turbidity is not none else '—' }}{% if latest_sensor.turbidity is not none %} NTU{% endif %}</td>
+                            <td id="sensorSummaryDO">{{ latest_sensor.dissolved_oxygen if latest_sensor.dissolved_oxygen is not none else '—' }}{% if latest_sensor.dissolved_oxygen is not none %} mg/L{% endif %}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-muted">No live sensor data available from Firebase.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toxin and Risk Charts Grid -->
+    <div class="row mt-4">
+        <!-- Toxin Levels Chart -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100" style="border-radius: 1rem; border: none; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.05);">
+                <div class="card-body p-4">
+                    <h5 class="card-title fw-bold mb-4" style="color: #1a4f76;">
+                        <i class="bi bi-pie-chart-fill me-2" style="color: #154360;"></i>Toxin Levels
+                    </h5>
+                    <div style="height: 300px; position: relative;">
+                        <canvas id="toxinChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Risk Distribution Chart -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100" style="border-radius: 1rem; border: none; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.05);">
+                <div class="card-body p-4">
+                    <h5 class="card-title fw-bold mb-4" style="color: #1a4f76;">
+                        <i class="bi bi-pie-chart-fill me-2" style="color: #154360;"></i>Risk Distribution
+                    </h5>
+                    <div style="height: 300px; position: relative;">
+                        <canvas id="riskChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+.risk-dial-normal,
+.risk-dial-warning,
+.risk-dial-high {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    border: 8px solid;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.risk-dial-normal {
+    border-color: #23C268;
+    background-color: rgba(35, 194, 104, 0.12);
+}
+.risk-dial-warning {
+    border-color: #F39C12;
+    background-color: rgba(243, 156, 18, 0.12);
+}
+.risk-dial-high {
+    border-color: #E74C3C;
+    background-color: rgba(231, 76, 60, 0.12);
+}
+.risk-dial-label {
+    font-size: 0.8rem;
+}
+.risk-dial-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+.risk-dial-normal .risk-dial-label,
+.risk-dial-normal .risk-dial-value { color: #23C268; }
+.risk-dial-warning .risk-dial-label,
+.risk-dial-warning .risk-dial-value { color: #F39C12; }
+.risk-dial-high .risk-dial-label,
+.risk-dial-high .risk-dial-value { color: #E74C3C; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const latestSensor = {{ {
+        'temperature': latest_sensor.temperature if latest_sensor and latest_sensor.temperature is not none else none,
+        'ph': latest_sensor.ph if latest_sensor and latest_sensor.ph is not none else none,
+        'salinity': latest_sensor.salinity if latest_sensor and latest_sensor.salinity is not none else none,
+        'turbidity': latest_sensor.turbidity if latest_sensor and latest_sensor.turbidity is not none else none,
+        'dissolved_oxygen': latest_sensor.dissolved_oxygen if latest_sensor and latest_sensor.dissolved_oxygen is not none else none,
+    } | tojson }};
+
+    let currentRisk = {{ risk_assessment | tojson }};
+
+    const chartLabels = ['Latest'];
+
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    display: false
+                }
+            },
+            y: {
+                beginAtZero: false
+            }
+        },
+        elements: {
+            line: {
+                tension: 0.4
+            }
+        }
+    };
+
+    function createChart(ctx, data, borderColor, backgroundColor) {
+        return new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    data: data,
+                    borderColor: borderColor,
+                    backgroundColor: backgroundColor,
+                    fill: true,
+                    pointRadius: 3,
+                    pointBackgroundColor: borderColor,
+                }]
+            },
+            options: chartOptions
+        });
+    }
+
+    const charts = {
+        temp: createChart(document.getElementById('tempChart').getContext('2d'), [latestSensor.temperature ?? 0], '#F39C12', 'rgba(243, 156, 18, 0.1)'),
+        ph: createChart(document.getElementById('phChart').getContext('2d'), [latestSensor.ph ?? 0], '#2ECC71', 'rgba(46, 204, 113, 0.1)'),
+        salinity: createChart(document.getElementById('salinityChart').getContext('2d'), [latestSensor.salinity ?? 0], '#3498DB', 'rgba(52, 152, 219, 0.1)'),
+        turbidity: createChart(document.getElementById('turbidityChart').getContext('2d'), [latestSensor.turbidity ?? 0], '#1ABC9C', 'rgba(26, 188, 156, 0.1)'),
+        oxygen: createChart(document.getElementById('oxygenChart').getContext('2d'), [latestSensor.dissolved_oxygen ?? 0], '#9B59B6', 'rgba(155, 89, 182, 0.1)'),
+    };
+
+    function updateRiskAssessment(risk) {
+        if (!risk) return;
+        currentRisk = risk;
+
+        const card = document.getElementById('riskLevelCard');
+        const badge = document.getElementById('riskLevelBadge');
+        const dial = document.getElementById('riskDial');
+        const dialValue = document.getElementById('riskDialValue');
+        const message = document.getElementById('riskMessage');
+        const triggeredList = document.getElementById('riskTriggeredList');
+
+        if (card) {
+            card.className = `card shadow-sm ${risk.card_bg} ${risk.card_class}`;
+        }
+        if (badge) {
+            badge.textContent = risk.overall_label.toUpperCase();
+        }
+        if (dial) {
+            dial.className = risk.dial_class;
+        }
+        if (dialValue) {
+            dialValue.textContent = risk.overall_label.split(' ')[0].toUpperCase();
+        }
+        if (message) {
+            message.textContent = risk.message;
+        }
+        if (triggeredList) {
+            if (risk.triggered && risk.triggered.length) {
+                triggeredList.innerHTML = risk.triggered.map(function (param) {
+                    const color = param.level === 'high' ? 'danger' : 'warning';
+                    return `
+                        <div class="d-flex justify-content-between border-bottom py-1">
+                            <span>${param.name}</span>
+                            <span class="fw-bold text-${color}">${param.label}</span>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                triggeredList.innerHTML = '<p class="text-success mb-0 text-center">All active sensors within normal range.</p>';
+            }
+        }
+
+        if (riskChart && risk.distribution) {
+            const dist = risk.distribution;
+            riskChart.data.datasets[0].data = [dist.normal || 0, dist.warning || 0, dist.high || 0];
+            riskChart.update();
+        }
+    }
+
+    function updateDashboard(payload) {
+        const data = payload?.sensor_data;
+        if (!data) return;
+
+        charts.temp.data.datasets[0].data = [data.temperature ?? 0];
+        charts.ph.data.datasets[0].data = [data.ph ?? 0];
+        charts.salinity.data.datasets[0].data = [data.salinity ?? 0];
+        charts.turbidity.data.datasets[0].data = [data.turbidity ?? 0];
+        charts.oxygen.data.datasets[0].data = [data.dissolved_oxygen ?? 0];
+
+        Object.values(charts).forEach(function (chart) { chart.update(); });
+
+        const setText = function (id, value) {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        };
+
+        setText('sensorSummaryTemp', data.temperature != null ? `${Number(data.temperature).toFixed(1)} °C` : '—');
+        setText('sensorSummaryPh', data.ph != null ? Number(data.ph).toFixed(1) : '—');
+        setText('sensorSummarySalinity', data.salinity != null ? `${data.salinity} ppt` : '—');
+        setText('sensorSummaryTurbidity', data.turbidity != null ? `${Number(data.turbidity).toFixed(1)} NTU` : '—');
+        setText('sensorSummaryDO', data.dissolved_oxygen != null ? `${data.dissolved_oxygen} mg/L` : '—');
+        setText('sensorSummaryTime', data.last_update || 'Latest');
+
+        updateRiskAssessment(payload.risk_assessment);
+    }
+
+    document.addEventListener('sensor-data-update', function (event) {
+        updateDashboard(event.detail);
+    });
+
+    // Risk Distribution Chart
+    const riskCtx = document.getElementById('riskChart').getContext('2d');
+    const initialDist = currentRisk.distribution || { normal: 0, warning: 0, high: 0 };
+    let riskChart = new Chart(riskCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Normal', 'Warning', 'High Risk'],
+            datasets: [{
+                data: [initialDist.normal || 0, initialDist.warning || 0, initialDist.high || 0],
+                backgroundColor: ['#23C268', '#F39C12', '#F93939'],
+                borderWidth: 2,
+                borderColor: '#ffffff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '60%',
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20,
+                        boxWidth: 10,
+                        color: '#6c757d'
+                    }
+                }
+            }
+        }
+    });
+
+    updateRiskAssessment(currentRisk);
+
+    // Toxin Levels Doughnut Chart
+    const toxinCtx = document.getElementById('toxinChart').getContext('2d');
+    new Chart(toxinCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Low Toxin (54%)', 'Moderate Toxin (32%)', 'High Toxin (14%)'],
+            datasets: [{
+                data: [54, 32, 14],
+                backgroundColor: ['#4DA2D6', '#9FD2F1', '#1C618A'], // Matched colors based on image breakdown
+                borderWidth: 2,
+                borderColor: '#ffffff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '60%',
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20,
+                        boxWidth: 10,
+                        color: '#6c757d'
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
+
+
+
+
+

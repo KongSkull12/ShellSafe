@@ -1,0 +1,120 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+.hero-section {
+    background: linear-gradient(to right, #a1c4fd, #c2e9fb);
+    padding: 100px 0;
+    color: #fff;
+}
+
+.hero-section h1 {
+    font-weight: 700;
+    color: #0d274d;
+}
+
+.hero-section .lead {
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: #3b5d8a;
+}
+
+.feature-card {
+    background-color: white;
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    transition: transform .2s;
+}
+
+.feature-card:hover {
+    transform: scale(1.05);
+}
+
+.feature-card .card-title {
+    font-weight: 600;
+    color: #0d274d;
+}
+
+.feature-card .card-text {
+    color: #3b5d8a;
+}
+
+.feature-card i {
+    color: #0d6efd;
+}
+
+.feature-card-2 {
+    background-color: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 15px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+    transition: all 0.3s ease-in-out;
+}
+
+.feature-card-2:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+}
+
+.feature-card-2 .card-title {
+    font-weight: 600;
+    color: #004d40;
+}
+
+.feature-card-2 .card-text {
+    color: #00796b;
+}
+
+.team-card {
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    transition: transform .3s ease-in-out, box-shadow .3s ease-in-out;
+}
+
+.team-card {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+
+.team-card.fade-in {
+    opacity: 1;
+    transform: translateY(0);
+}
+.team-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+}
+
+#mikyla-photo {
+    object-position: 50% 20%; /* Adjust the second value to move the image vertically */
+}
+
+.team-photo {
+    width: 150px;
+    height: 150px;
+    object-fit: cover;
+    border: 5px solid #fff;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.team-card .card-title {
+    font-weight: 600;
+    color: #004d40;
+}
+
+.team-card .card-text {
+    color: #00796b;
+}
+.feature-card-2 i {
+    color: #007bff;
+}
+.hero-section h1 .detection-system {
+    color: #007bff;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}

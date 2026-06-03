@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ShellSafe Authority Dashboard{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.5/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body
+    {% if current_user.is_authenticated %}
+    data-sensor-stream-url="{{ url_for('main.api_sensor_stream') }}"
+    data-sensor-poll-url="{{ url_for('main.api_sensor_data') }}"
+    {% endif %}
+>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe Logo" style="width: 150px; height: auto;">
+            </div>
+            <ul class="nav flex-column">
+
+                <li class="nav-item">
+                   <a class="nav-link" href="#">
+                      <i class="bi bi-person-circle"></i>
+                       <span class="user-name">Aleah Reyes</span>
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'main.authority_dashboard' %}active{% endif %}" href="{{ url_for('main.authority_dashboard') }}">
+                        <i class="bi bi-grid-fill"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'main.authority_alerts' %}active{% endif %}" href="{{ url_for('main.authority_alerts') }}">
+                        <i class="bi bi-bell-fill"></i>
+                        <span>Alerts</span>
+                    </a>
+                </li>
+                
+                <li class="nav-item mt-auto">
+                    <a class="nav-link" href="{{ url_for('auth.logout') }}">
+                        <i class="bi bi-door-open-fill"></i>
+                        <span>Logout</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <!-- Main Content -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% if current_user.is_authenticated %}
+    <script src="{{ url_for('static', filename='js/sensor-live.js') }}"></script>
+    {% endif %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

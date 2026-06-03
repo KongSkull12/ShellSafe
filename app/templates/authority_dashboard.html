@@ -1,0 +1,257 @@
+{% extends "authority_base.html" %}
+
+{% block title %}Authority Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h2 mb-4">Authority Dashboard</h1>
+
+    <!-- Section 1: Current Algal Bloom Risk Status -->
+    <div class="card-group mb-4">
+        <div class="card text-center shadow-sm" id="authorityRiskCard">
+            <div class="card-body">
+                <h5 class="card-title">Current Algal Bloom Risk Level</h5>
+                <p class="display-4 fw-bold" id="authorityRiskScore">{{ risk_assessment.overall_score }}%</p>
+                <p class="card-text">Status: <span class="fw-bold" id="authorityRiskLabel">{{ risk_assessment.overall_label }}</span></p>
+                <span class="badge p-2" id="authorityRiskBadge">{{ risk_assessment.overall_label }}</span>
+                <p class="text-muted small mt-3 mb-0" id="authorityRiskMessage">{{ risk_assessment.message }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 2: Real-Time Water Quality Monitoring -->
+    <div class="row mb-4">
+        <div class="col-md-4 col-xl-2 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <i class="bi bi-thermometer-half fs-1 text-primary me-3"></i>
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Temperature</h6>
+                        <p class="card-text fs-4 fw-bold" id="authorityTemperature">
+                            {% if latest_sensor and latest_sensor.temperature is not none %}
+                                {{ '%.1f'|format(latest_sensor.temperature) }}°C
+                            {% else %}—{% endif %}
+                        </p>
+                        <small class="text-muted">Normal: 20–30°C</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-xl-2 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <i class="bi bi-droplet-half fs-1 text-info me-3"></i>
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">pH Level</h6>
+                        <p class="card-text fs-4 fw-bold" id="authorityPh">
+                            {% if latest_sensor and latest_sensor.ph is not none %}
+                                {{ '%.1f'|format(latest_sensor.ph) }}
+                            {% else %}—{% endif %}
+                        </p>
+                        <small class="text-muted">Normal: 6.5–8.5</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-xl-2 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <i class="bi bi-wind fs-1 text-success me-3"></i>
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Dissolved Oxygen</h6>
+                        <p class="card-text fs-4 fw-bold" id="authorityDO">
+                            {% if latest_sensor and latest_sensor.dissolved_oxygen is not none %}
+                                {{ '%.1f'|format(latest_sensor.dissolved_oxygen) }} mg/L
+                            {% else %}—{% endif %}
+                        </p>
+                        <small class="text-muted">Normal: >5 mg/L</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-xl-2 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <i class="bi bi-moisture fs-1 text-warning me-3"></i>
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Salinity</h6>
+                        <p class="card-text fs-4 fw-bold" id="authoritySalinity">
+                            {% if latest_sensor and latest_sensor.salinity is not none %}
+                                {{ '%.1f'|format(latest_sensor.salinity) }} ppt
+                            {% else %}—{% endif %}
+                        </p>
+                        <small class="text-muted">Normal: 30–35 ppt</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-xl-2 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <i class="bi bi-eye-slash-fill fs-1 text-secondary me-3"></i>
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Turbidity</h6>
+                        <p class="card-text fs-4 fw-bold" id="authorityTurbidity">
+                            {% if latest_sensor and latest_sensor.turbidity is not none %}
+                                {{ '%.1f'|format(latest_sensor.turbidity) }} NTU
+                            {% else %}—{% endif %}
+                        </p>
+                        <small class="text-muted">Normal: <50 NTU</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Section 3: Algal Bloom Risk Trend -->
+        <div class="col-lg-8 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Temperature, pH & Bloom Risk Trends</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="riskTrendChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <!-- Section 4: Risk Distribution -->
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Risk Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="riskDistributionChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    function applyRiskBadge(level) {
+        const badge = document.getElementById('authorityRiskBadge');
+        if (!badge) return;
+        badge.className = 'badge p-2';
+        if (level === 'high') badge.classList.add('bg-danger');
+        else if (level === 'warning') badge.classList.add('bg-warning', 'text-dark');
+        else badge.classList.add('bg-success');
+    }
+
+    applyRiskBadge({{ risk_assessment.overall_level | tojson }});
+
+    var riskTrendCtx = document.getElementById('riskTrendChart').getContext('2d');
+    var riskTrendChart = new Chart(riskTrendCtx, {
+        type: 'line',
+        data: {
+            labels: ['Latest'],
+            datasets: [{
+                label: 'Temperature (°C)',
+                data: [{{ latest_sensor.temperature if latest_sensor and latest_sensor.temperature is not none else 0 }}],
+                borderColor: 'orange',
+                tension: 0.4,
+                fill: false
+            }, {
+                label: 'pH Level',
+                data: [{{ latest_sensor.ph if latest_sensor and latest_sensor.ph is not none else 0 }}],
+                borderColor: 'green',
+                tension: 0.4,
+                fill: false
+            }, {
+                label: 'Turbidity (NTU)',
+                data: [{{ latest_sensor.turbidity if latest_sensor and latest_sensor.turbidity is not none else 0 }}],
+                borderColor: 'brown',
+                tension: 0.4,
+                fill: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+
+    var riskDistributionCtx = document.getElementById('riskDistributionChart').getContext('2d');
+    var riskDistributionChart = new Chart(riskDistributionCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Normal', 'Warning', 'High Risk'],
+            datasets: [{
+                data: [
+                    {{ risk_assessment.distribution.normal }},
+                    {{ risk_assessment.distribution.warning }},
+                    {{ risk_assessment.distribution.high }}
+                ],
+                backgroundColor: ['#28a745', '#ffc107', '#dc3545']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    document.addEventListener('sensor-data-update', function (event) {
+        const risk = event.detail?.risk_assessment;
+        const data = event.detail?.sensor_data;
+
+        if (risk) {
+            const score = document.getElementById('authorityRiskScore');
+            const label = document.getElementById('authorityRiskLabel');
+            const message = document.getElementById('authorityRiskMessage');
+            const badge = document.getElementById('authorityRiskBadge');
+
+            if (score) score.textContent = `${risk.overall_score}%`;
+            if (label) label.textContent = risk.overall_label;
+            if (message) message.textContent = risk.message;
+            if (badge) {
+                badge.textContent = risk.overall_label;
+                applyRiskBadge(risk.overall_level);
+            }
+
+            if (risk.distribution) {
+                riskDistributionChart.data.datasets[0].data = [
+                    risk.distribution.normal || 0,
+                    risk.distribution.warning || 0,
+                    risk.distribution.high || 0
+                ];
+                riskDistributionChart.update();
+            }
+        }
+
+        if (!data || !window.ShellSafeSensor) return;
+
+        const temp = document.getElementById('authorityTemperature');
+        const ph = document.getElementById('authorityPh');
+        const turbidity = document.getElementById('authorityTurbidity');
+        const dissolvedOxygen = document.getElementById('authorityDO');
+        const salinity = document.getElementById('authoritySalinity');
+
+        if (temp) temp.textContent = ShellSafeSensor.formatTemperature(data.temperature);
+        if (ph) ph.textContent = ShellSafeSensor.formatPh(data.ph);
+        if (turbidity) turbidity.textContent = ShellSafeSensor.formatTurbidity(data.turbidity);
+        if (dissolvedOxygen) {
+            dissolvedOxygen.textContent = data.dissolved_oxygen != null
+                ? `${Number(data.dissolved_oxygen).toFixed(1)} mg/L` : '—';
+        }
+        if (salinity) {
+            salinity.textContent = data.salinity != null
+                ? `${Number(data.salinity).toFixed(1)} ppt` : '—';
+        }
+
+        riskTrendChart.data.datasets[0].data = [data.temperature ?? 0];
+        riskTrendChart.data.datasets[1].data = [data.ph ?? 0];
+        riskTrendChart.data.datasets[2].data = [data.turbidity ?? 0];
+        riskTrendChart.update();
+    });
+});
+</script>
+{% endblock %}
