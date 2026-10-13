@@ -1,0 +1,94 @@
+{% extends "dashboard_base.html" %}
+
+{% block content %}
+<div class="dash-page">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert ss-flash alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <header class="dash-page-header">
+        <div>
+            <p class="dash-kicker">Alerts</p>
+            <h1>Sensor thresholds</h1>
+            <p class="text-muted mb-0 mt-1">
+                Set Normal, Warning, and Alert bands for each sensor. Leave Alert Min/Max empty if that edge does not apply.
+                Values are stored at <code>/threshold_config</code> and drive dashboard risk + in-app alerts.
+            </p>
+        </div>
+    </header>
+
+    <form method="POST" action="{{ url_for('main.threshold_settings') }}">
+        {% for sensor in sensors %}
+        <section class="ss-panel mb-3">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2 mb-3">
+                <h2 class="mb-0">{{ sensor.label }}{% if sensor.unit %} <span class="text-muted fw-normal">({{ sensor.unit.strip() }})</span>{% endif %}</h2>
+                <span class="ss-chip">{{ sensor.key }}</span>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="threshold-band threshold-band-normal p-3 h-100">
+                        <div class="fw-semibold mb-2 text-success">Normal</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_normal_min">Min</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_normal_min" id="{{ sensor.key }}_normal_min" value="{{ sensor.normal_min if sensor.normal_min is not none else '' }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_normal_max">Max</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_normal_max" id="{{ sensor.key }}_normal_max" value="{{ sensor.normal_max if sensor.normal_max is not none else '' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="threshold-band threshold-band-warning p-3 h-100">
+                        <div class="fw-semibold mb-2" style="color: var(--orange);">Warning</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_warning_min">Min</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_warning_min" id="{{ sensor.key }}_warning_min" value="{{ sensor.warning_min if sensor.warning_min is not none else '' }}">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_warning_max">Max</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_warning_max" id="{{ sensor.key }}_warning_max" value="{{ sensor.warning_max if sensor.warning_max is not none else '' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="threshold-band threshold-band-alert p-3 h-100">
+                        <div class="fw-semibold mb-2 text-danger">Alert</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_alert_min">Min</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_alert_min" id="{{ sensor.key }}_alert_min" value="{{ sensor.alert_min if sensor.alert_min is not none else '' }}" placeholder="optional">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small" for="{{ sensor.key }}_alert_max">Max</label>
+                                <input class="form-control" type="number" step="any" name="{{ sensor.key }}_alert_max" id="{{ sensor.key }}_alert_max" value="{{ sensor.alert_max if sensor.alert_max is not none else '' }}" placeholder="optional">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+                Priority: <strong>Alert</strong> (outside alert min/max) → <strong>Warning</strong> (outside warning min/max) → <strong>Normal</strong>.
+                Example: Temp alert max {{ defaults[sensor.key].alert_max if defaults[sensor.key].alert_max is not none else '—' }}{{ sensor.unit }}.
+            </p>
+        </section>
+        {% endfor %}
+
+        <div class="dash-toolbar">
+            <button type="submit" class="ss-btn-primary"><i class="bi bi-save"></i> Save thresholds</button>
+            <a href="{{ url_for('main.admin_dashboard') }}" class="ss-btn-ghost">Back to dashboard</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

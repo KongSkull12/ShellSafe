@@ -1,108 +1,67 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container-fluid hero-section">
-    <div class="container">
-        <div class="row">
-            <div class="col-lg-8 offset-lg-2 text-center">
-                <h1 class="display-4">Real-Time Algal Bloom<br><span class="detection-system">Detection System</span></h1>
-                <p class="lead">ShellSafe provides real-time monitoring and predictive analytics for coastal water quality, helping protect marine ecosystems and coastal communities from harmful algal blooms.</p>
-            </div>
-        </div>
-        <div class="row mt-5">
-            <div class="col-md-4">
-                <div class="card feature-card">
-                    <div class="card-body text-center">
-                        <i class="fas fa-chart-line fa-3x mb-3"></i>
-                        <h5 class="card-title">Real-time</h5>
-                        <p class="card-text">Data Updates</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card feature-card">
-                    <div class="card-body text-center">
-                        <i class="fas fa-microchip fa-3x mb-3"></i>
-                        <h5 class="card-title">IoT Enabled</h5>
-                        <p class="card-text">Smart Sensors</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card feature-card">
-                    <div class="card-body text-center">
-                        <i class="fas fa-bell fa-3x mb-3"></i>
-                        <h5 class="card-title">Instant Alerts</h5>
-                        <p class="card-text">Risk Notifications</p>
-                    </div>
-                </div>
-            </div>
+<section class="ss-hero">
+    <div class="ss-hero-waves" aria-hidden="true">
+        <svg viewBox="0 0 1440 320" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#0d7377" fill-opacity="0.18" d="M0,224L48,208C96,192,192,160,288,165.3C384,171,480,213,576,224C672,235,768,213,864,186.7C960,160,1056,128,1152,133.3C1248,139,1344,181,1392,202.7L1440,224L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path>
+            <path fill="#043944" fill-opacity="0.12" d="M0,256L60,240C120,224,240,192,360,192C480,192,600,224,720,229.3C840,235,960,213,1080,197.3C1200,181,1320,171,1380,165.3L1440,160L1440,320L1380,320C1320,320,1200,320,1080,320C960,320,840,320,720,320C600,320,480,320,360,320C240,320,120,320,60,320L0,320Z"></path>
+        </svg>
+    </div>
+    <div class="ss-hero-inner">
+        <h1 class="ss-brand-mark">
+            <img src="{{ url_for('static', filename='img/logo.png') }}" alt="">ShellSafe
+        </h1>
+        <p class="ss-hero-line">Coastal bloom risk, watched in real time.</p>
+        <p class="ss-hero-support">Live sensor data from ESP32 T-Call A7670 helps authorities spot harmful algal bloom conditions before they spread.</p>
+        <div class="ss-hero-cta">
+            {% if current_user.is_anonymous %}
+            <a class="ss-btn ss-btn-primary" href="{{ url_for('auth.login') }}">Open monitoring platform</a>
+            {% elif current_user.role == 'admin' %}
+            <a class="ss-btn ss-btn-primary" href="{{ url_for('main.admin_dashboard') }}">Go to dashboard</a>
+            {% else %}
+            <a class="ss-btn ss-btn-primary" href="{{ url_for('main.authority_dashboard') }}">Go to dashboard</a>
+            {% endif %}
         </div>
     </div>
-</div>
+</section>
 
-<div class="container mt-5">
-    <div class="row text-center">
-        <div class="col">
-            <h2 class="mb-2">Key Features</h2>
-            <p class="lead mb-5">"Advanced monitoring and predictive analytics for coastal water safety."</p>
+<section class="ss-section">
+    <div class="container">
+        <div class="ss-section-head">
+            <h2>Five field sensors</h2>
+            <p>Every reading comes from hardware on the T-Call A7670 — disconnected probes show as Disconnected, never as false faults.</p>
         </div>
+        <ul class="ss-sensor-rail ss-reveal-stagger">
+            <li><strong>Temperature</strong><span>DS18B20</span></li>
+            <li><strong>pH</strong><span>PH-4502C</span></li>
+            <li><strong>Turbidity</strong><span>Analog NTU</span></li>
+            <li><strong>ORP</strong><span>Redox mV</span></li>
+            <li><strong>EC</strong><span>DFRobot µS/cm</span></li>
+        </ul>
     </div>
-    <div class="row">
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-water fa-3x mb-3"></i>
-                    <h5 class="card-title">Real-Time Water Monitoring</h5>
-                    <p class="card-text">Continuously monitors water temperature, pH, dissolved oxygen, salinity, and turbidity in real time.</p>
-                </div>
-            </div>
+</section>
+
+<section class="ss-section ss-section-alt">
+    <div class="container">
+        <div class="ss-section-head">
+            <h2>From water to decision</h2>
+            <p>One path from the shoreline node to SMS and the dashboard.</p>
         </div>
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-satellite-dish fa-3x mb-3"></i>
-                    <h5 class="card-title">IoT-Enabled Data Collection</h5>
-                    <p class="card-text">Collects and transmits environmental data from coastal monitoring devices using cellular communication technology.</p>
-                </div>
+        <div class="ss-steps ss-reveal-stagger">
+            <div class="ss-step">
+                <h3>Sense</h3>
+                <p>The ESP32 samples temperature, pH, turbidity, ORP, and EC every few seconds.</p>
             </div>
-        </div>
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-robot fa-3x mb-3"></i>
-                    <h5 class="card-title">Predictive Analytics</h5>
-                    <p class="card-text">Analyzes environmental conditions and predicts potential harmful algal bloom risks using intelligent analytics.</p>
-                </div>
+            <div class="ss-step">
+                <h3>Assess</h3>
+                <p>Firmware thresholds flag bloom-related risk; the web app mirrors the same rules.</p>
             </div>
-        </div>
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
-                    <h5 class="card-title">Smart Alert System</h5>
-                    <p class="card-text">Automatically sends web notifications and SMS alerts to authorities when abnormal water conditions are detected.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-history fa-3x mb-3"></i>
-                    <h5 class="card-title">Historical Data & Analytics</h5>
-                    <p class="card-text">Provides trend analysis, charts, and historical monitoring records for informed decision-making.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-lg-4 col-md-6 mb-4">
-            <div class="card h-100 feature-card-2">
-                <div class="card-body text-center">
-                    <i class="fas fa-battery-full fa-3x mb-3"></i>
-                    <h5 class="card-title">Device Health Monitoring</h5>
-                    <p class="card-text">Tracks battery level, connectivity status, and device performance to ensure reliable operation.</p>
-                </div>
+            <div class="ss-step">
+                <h3>Alert</h3>
+                <p>The A7670 modem sends SMS; the platform shows live status and history for authorities.</p>
             </div>
         </div>
     </div>
-</div>
+</section>
 {% endblock %}

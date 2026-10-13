@@ -284,15 +284,16 @@ class FirestoreService:
             readings.append({'id': doc.id, **doc.to_dict()})
         return readings
     
-    def create_sensor_reading(self, temperature: float, ph: float, dissolved_oxygen: float,
-                            salinity: float, turbidity: float) -> str:
-        """Create a new sensor reading."""
+    def create_sensor_reading(self, temperature: float = None, ph: float = None,
+                              turbidity: float = None, orp: float = None,
+                              ec: float = None) -> str:
+        """Create a new sensor reading (Temp, pH, Turbidity, ORP, EC)."""
         reading_data = {
             'temperature': temperature,
             'ph': ph,
-            'dissolved_oxygen': dissolved_oxygen,
-            'salinity': salinity,
             'turbidity': turbidity,
+            'orp': orp,
+            'ec': ec,
             'timestamp': datetime.utcnow()
         }
         _, doc_ref = self.db.collection('sensor_readings').add(reading_data)

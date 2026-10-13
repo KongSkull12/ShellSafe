@@ -14,3 +14,11 @@ IoT shellfish / aquaculture monitoring system: Flask web dashboard and Firebase 
 3. Run the app: `python run.py`
 
 See `QUICK_START.md` and `FIREBASE_MIGRATION_GUIDE.md` for more detail.
+
+Role	Email	Password
+Admin
+system.admin@gmail.com
+admin123
+Authority
+coastal.auth@gmail.com
+coast123

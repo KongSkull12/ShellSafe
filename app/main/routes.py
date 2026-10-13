@@ -1,12 +1,28 @@
-from flask import render_template, redirect, url_for, flash, jsonify, Response, stream_with_context
+from flask import render_template, redirect, url_for, flash, jsonify, Response, stream_with_context, request
 from flask_login import login_required, current_user
 from app.main import bp
 from functools import wraps
 from app.models import Alert, Report
 from app.firestore_service import get_firestore_service
 from app.alert_helpers import normalize_alerts
-from app.realtime_db_service import get_latest_sensor_data, get_sensor_statuses
+from app.realtime_db_service import (
+    get_latest_sensor_data,
+    get_sensor_statuses,
+    get_sms_phones,
+    set_sms_phones,
+    get_sms_test_status,
+    request_sms_test,
+    MAX_SMS_PHONES,
+)
 from app.risk_service import assess_bloom_risk
+from app.live_alert_sync import sync_live_alerts
+from app.threshold_service import (
+    SENSOR_ORDER,
+    get_default_thresholds,
+    get_thresholds,
+    set_thresholds,
+    thresholds_for_form,
+)
 from datetime import datetime
 import json
 import time
@@ -195,55 +211,204 @@ def devices():
     all_devices = db.get_all_devices()
     sensor_data = get_latest_sensor_data()
     sensor_statuses = get_sensor_statuses(sensor_data)
+    is_online = bool(sensor_data and sensor_data.get('is_online'))
     return render_template(
         'devices.html',
         title='Devices',
         devices=all_devices,
         sensor_data=sensor_data,
         sensor_statuses=sensor_statuses,
+        is_online=is_online,
+    )
+
+
+@bp.route('/settings/sms', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def sms_settings():
+    """Admin Notification Settings — up to 4 SMS recipients for T-Call A7670."""
+    phones = get_sms_phones()
+
+    if request.method == 'POST':
+        submitted = []
+        for i in range(1, MAX_SMS_PHONES + 1):
+            value = (request.form.get(f'phone_{i}') or '').strip()
+            if value:
+                submitted.append(value)
+
+        if len(submitted) > MAX_SMS_PHONES:
+            flash(f'You can save at most {MAX_SMS_PHONES} phone numbers.', 'error')
+            return redirect(url_for('main.sms_settings'))
+
+        try:
+            saved = set_sms_phones(submitted)
+        except Exception as exc:
+            flash(f'Failed to save SMS numbers: {exc}', 'error')
+            return redirect(url_for('main.sms_settings'))
+
+        if submitted and not saved:
+            flash('No valid phone numbers. Use E.164 format, e.g. +639171234567.', 'error')
+        elif len(saved) < len(submitted):
+            flash(
+                f'Saved {len(saved)} valid number(s). Invalid entries were skipped.',
+                'warning',
+            )
+        else:
+            flash(f'SMS recipients updated ({len(saved)} of {MAX_SMS_PHONES} max).', 'success')
+        return redirect(url_for('main.sms_settings'))
+
+    # Pad to MAX_SMS_PHONES slots for the form
+    phone_slots = list(phones) + [''] * (MAX_SMS_PHONES - len(phones))
+    return render_template(
+        'sms_settings.html',
+        title='SMS Notification Settings',
+        phone_slots=phone_slots[:MAX_SMS_PHONES],
+        max_phones=MAX_SMS_PHONES,
+        saved_count=len(phones),
+        sms_test=get_sms_test_status(),
+    )
+
+
+@bp.route('/settings/sms/test', methods=['POST'])
+@login_required
+@role_required('admin')
+def sms_test_send():
+    """Queue a manual SMS test for the on-device A7670 modem."""
+    wants_json = (
+        request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or request.accept_mimetypes.best == 'application/json'
+        or 'application/json' in (request.headers.get('Accept') or '')
+    )
+    try:
+        payload = request_sms_test(
+            requested_by=getattr(current_user, 'email', None) or 'admin'
+        )
+    except ValueError as exc:
+        if wants_json:
+            return jsonify({'ok': False, 'error': str(exc)}), 400
+        flash(str(exc), 'error')
+        return redirect(url_for('main.sms_settings'))
+    except Exception as exc:
+        if wants_json:
+            return jsonify({'ok': False, 'error': f'Failed to queue test SMS: {exc}'}), 500
+        flash(f'Failed to queue test SMS: {exc}', 'error')
+        return redirect(url_for('main.sms_settings'))
+
+    if wants_json:
+        return jsonify({'ok': True, 'sms_test': payload})
+    flash(
+        'Test SMS queued. Keep the device online — the modem will send it shortly.',
+        'success',
+    )
+    return redirect(url_for('main.sms_settings'))
+
+
+@bp.route('/settings/sms/test/status')
+@login_required
+@role_required('admin')
+def sms_test_status():
+    """Poll SMS test delivery status written by firmware."""
+    return jsonify({'ok': True, 'sms_test': get_sms_test_status()})
+
+
+@bp.route('/settings/thresholds', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def threshold_settings():
+    """Admin page to configure Normal / Warning / Alert bands per sensor."""
+    if request.method == 'POST':
+        submitted = {}
+        for key in SENSOR_ORDER:
+            submitted[key] = {
+                'normal_min': request.form.get(f'{key}_normal_min'),
+                'normal_max': request.form.get(f'{key}_normal_max'),
+                'warning_min': request.form.get(f'{key}_warning_min'),
+                'warning_max': request.form.get(f'{key}_warning_max'),
+                'alert_min': request.form.get(f'{key}_alert_min'),
+                'alert_max': request.form.get(f'{key}_alert_max'),
+            }
+        try:
+            set_thresholds(submitted)
+            flash('Sensor thresholds saved. Risk scoring and in-app alerts will use these values.', 'success')
+        except Exception as exc:
+            flash(f'Failed to save thresholds: {exc}', 'error')
+        return redirect(url_for('main.threshold_settings'))
+
+    return render_template(
+        'threshold_settings.html',
+        title='Alert Thresholds',
+        sensors=thresholds_for_form(),
+        defaults=get_default_thresholds(),
     )
 
 
 @bp.route('/api/sensor-data')
 @login_required
 def api_sensor_data():
+    # Poll path: no Firestore alert writes (avoids freeze under frequent refresh).
     sensor_data = get_latest_sensor_data()
+    risk_assessment = assess_bloom_risk(sensor_data)
     return jsonify({
         'sensor_data': sensor_data,
         'sensor_statuses': get_sensor_statuses(sensor_data),
-        'risk_assessment': assess_bloom_risk(sensor_data),
+        'risk_assessment': risk_assessment,
+        'is_online': bool(sensor_data and sensor_data.get('is_online')),
     })
 
 
 @bp.route('/api/sensor-stream')
 @login_required
 def api_sensor_stream():
-    """Push sensor updates to the browser when Firebase data changes."""
+    """Push sensor updates when Firebase data changes (throttled)."""
     @stream_with_context
     def generate():
-        last_timestamp = object()
+        last_state_key = object()
         keepalive_counter = 0
 
         while True:
             sensor_data = get_latest_sensor_data()
-            current_timestamp = sensor_data.get('timestamp') if sensor_data else None
+            # Fingerprint on readings so millis() uptime churn does not spam clients.
+            if sensor_data:
+                state_key = (
+                    sensor_data.get('temperature'),
+                    sensor_data.get('ph'),
+                    sensor_data.get('turbidity'),
+                    sensor_data.get('orp'),
+                    sensor_data.get('ec'),
+                    sensor_data.get('temperature_connected'),
+                    sensor_data.get('ph_connected'),
+                    sensor_data.get('turbidity_connected'),
+                    sensor_data.get('orp_connected'),
+                    sensor_data.get('ec_connected'),
+                    bool(sensor_data.get('is_online')),
+                    bool(sensor_data.get('gps_fix')),
+                    sensor_data.get('latitude'),
+                    sensor_data.get('longitude'),
+                    sensor_data.get('satellites'),
+                )
+            else:
+                state_key = None
 
-            if current_timestamp != last_timestamp:
-                last_timestamp = current_timestamp
+            if state_key != last_state_key:
+                last_state_key = state_key
+                risk_assessment = assess_bloom_risk(sensor_data)
+                sync_live_alerts(sensor_data, risk_assessment)
+                is_online = bool(sensor_data and sensor_data.get('is_online'))
                 payload = json.dumps({
                     'sensor_data': sensor_data,
                     'sensor_statuses': get_sensor_statuses(sensor_data),
-                    'risk_assessment': assess_bloom_risk(sensor_data),
+                    'risk_assessment': risk_assessment,
+                    'is_online': is_online,
                 })
                 yield f"data: {payload}\n\n"
                 keepalive_counter = 0
             else:
                 keepalive_counter += 1
-                if keepalive_counter >= 15:
+                if keepalive_counter >= 10:
                     yield ": keepalive\n\n"
                     keepalive_counter = 0
 
-            time.sleep(1)
+            time.sleep(3)
 
     return Response(
         generate(),
@@ -251,6 +416,7 @@ def api_sensor_stream():
         headers={
             'Cache-Control': 'no-cache',
             'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
         },
     )
 

@@ -121,40 +121,35 @@ def load_user(user_id: str) -> Optional[User]:
 
 
 class SensorData:
-    """Sensor reading data model for Firestore."""
+    """Sensor reading data model for Firestore (aligned with shellsafev2.ino)."""
     
-    def __init__(self, temperature: float, ph: float, dissolved_oxygen: float,
-                 salinity: float, turbidity: float, reading_id: str = None, timestamp: datetime = None):
+    def __init__(self, temperature: float = None, ph: float = None, turbidity: float = None,
+                 orp: float = None, ec: float = None, reading_id: str = None,
+                 timestamp: datetime = None):
         self.id = reading_id
         self.temperature = temperature
         self.ph = ph
-        self.dissolved_oxygen = dissolved_oxygen
-        self.salinity = salinity
         self.turbidity = turbidity
+        self.orp = orp
+        self.ec = ec
         self.timestamp = timestamp or datetime.utcnow()
     
     def save(self) -> str:
         """Save sensor reading to Firestore."""
         db = get_firestore_service()
+        payload = {
+            'temperature': self.temperature,
+            'ph': self.ph,
+            'turbidity': self.turbidity,
+            'orp': self.orp,
+            'ec': self.ec,
+            'timestamp': self.timestamp,
+        }
         if self.id:
-            db.db.collection('sensor_readings').document(self.id).update({
-                'temperature': self.temperature,
-                'ph': self.ph,
-                'dissolved_oxygen': self.dissolved_oxygen,
-                'salinity': self.salinity,
-                'turbidity': self.turbidity,
-                'timestamp': self.timestamp
-            })
+            db.db.collection('sensor_readings').document(self.id).update(payload)
             return self.id
         else:
-            doc_ref = db.db.collection('sensor_readings').add({
-                'temperature': self.temperature,
-                'ph': self.ph,
-                'dissolved_oxygen': self.dissolved_oxygen,
-                'salinity': self.salinity,
-                'turbidity': self.turbidity,
-                'timestamp': self.timestamp
-            })
+            doc_ref = db.db.collection('sensor_readings').add(payload)
             self.id = doc_ref[1].id
             return self.id
 

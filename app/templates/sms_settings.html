@@ -1,0 +1,181 @@
+{% extends "dashboard_base.html" %}
+
+{% block content %}
+{% set test_status = (sms_test.status if sms_test else 'idle')|lower %}
+<div class="dash-page">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert ss-flash alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <header class="dash-page-header">
+        <div>
+            <p class="dash-kicker">Notifications</p>
+            <h1>SMS recipients</h1>
+            <p class="text-muted mb-0 mt-1">Up to {{ max_phones }} numbers for T-Call A7670 alert SMS · stored at <code>/sms_config</code></p>
+        </div>
+    </header>
+
+    <div class="ss-split">
+        <section class="ss-panel">
+            <h2>Recipients ({{ saved_count }} / {{ max_phones }})</h2>
+            <form method="POST" action="{{ url_for('main.sms_settings') }}" class="mt-2">
+                {% for phone in phone_slots %}
+                <div class="mb-3">
+                    <label class="form-label small fw-bold" for="phone_{{ loop.index }}">Phone {{ loop.index }}</label>
+                    <input
+                        type="tel"
+                        class="form-control"
+                        id="phone_{{ loop.index }}"
+                        name="phone_{{ loop.index }}"
+                        value="{{ phone }}"
+                        placeholder="+639171234567"
+                        autocomplete="tel"
+                    >
+                </div>
+                {% endfor %}
+                <p class="text-muted small mb-3">
+                    Use international format with <strong>+</strong>. Leave blank to clear a slot.
+                </p>
+                <button type="submit" class="ss-btn-primary">
+                    <i class="bi bi-save"></i> Save recipients
+                </button>
+            </form>
+        </section>
+
+        <aside class="ss-panel">
+            <h2>Test SMS</h2>
+            <p class="small text-muted mt-2 mb-3">
+                Queues a test message for the T-Call A7670 modem. The device must be online with a working SIM.
+            </p>
+            <div class="d-flex flex-column gap-2 mb-3">
+                <div class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Status</span>
+                    <strong id="smsTestStatusLabel">
+                        {% if test_status == 'pending' %}Pending
+                        {% elif test_status == 'sent' %}Sent
+                        {% elif test_status == 'failed' %}Failed
+                        {% else %}Idle{% endif %}
+                    </strong>
+                </div>
+                <div class="d-flex justify-content-between gap-2">
+                    <span class="text-muted">Recipients</span>
+                    <strong id="smsTestRecipientCount">{{ sms_test.recipient_count if sms_test and sms_test.recipient_count else saved_count }}</strong>
+                </div>
+            </div>
+            <p class="small mb-3" id="smsTestDetail">{{ sms_test.detail if sms_test and sms_test.detail else 'No test queued yet.' }}</p>
+            <form id="smsTestForm" method="POST" action="{{ url_for('main.sms_test_send') }}">
+                <button type="submit" class="ss-btn-primary" id="smsTestBtn" {% if saved_count < 1 %}disabled{% endif %}>
+                    <i class="bi bi-chat-dots"></i> Send test SMS
+                </button>
+            </form>
+            {% if saved_count < 1 %}
+            <p class="small text-warning mt-2 mb-0">Save at least one phone number first.</p>
+            {% endif %}
+
+            <hr class="my-3">
+            <h2>How SMS works</h2>
+            <ul class="small text-muted mb-0 ps-3 mt-2">
+                <li class="mb-2">The A7670 modem sends SMS when firmware thresholds are crossed.</li>
+                <li class="mb-2">Use <strong>Send test SMS</strong> to verify delivery without waiting for an alert.</li>
+                <li class="mb-2">Rules: pH 6.5–8.5, turbidity &gt; 50 NTU, temp &gt; 35 °C, ORP &lt; 200 mV, EC &gt; 2000 µS/cm.</li>
+                <li class="mb-2">Disconnected sensors are skipped.</li>
+                <li>Numbers sync to <code>/sms_config</code>; test commands use <code>/sms_test</code>.</li>
+            </ul>
+        </aside>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('smsTestForm');
+    const btn = document.getElementById('smsTestBtn');
+    const statusLabel = document.getElementById('smsTestStatusLabel');
+    const detailEl = document.getElementById('smsTestDetail');
+    const recipientEl = document.getElementById('smsTestRecipientCount');
+    const statusUrl = {{ url_for('main.sms_test_status')|tojson }};
+    let pollTimer = null;
+
+    const labelFor = (status) => {
+        const map = { pending: 'Pending', sent: 'Sent', failed: 'Failed', idle: 'Idle' };
+        return map[status] || 'Idle';
+    };
+
+    const applyStatus = (smsTest) => {
+        if (!smsTest) return;
+        const status = String(smsTest.status || 'idle').toLowerCase();
+        if (statusLabel) statusLabel.textContent = labelFor(status);
+        if (detailEl) detailEl.textContent = smsTest.detail || 'No test queued yet.';
+        if (recipientEl && smsTest.recipient_count != null) {
+            recipientEl.textContent = String(smsTest.recipient_count);
+        }
+        if (status === 'pending') startPolling();
+        else stopPolling();
+    };
+
+    const stopPolling = () => {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    };
+
+    const startPolling = () => {
+        if (pollTimer) return;
+        pollTimer = setInterval(async () => {
+            try {
+                const res = await fetch(statusUrl, {
+                    headers: { Accept: 'application/json' },
+                    cache: 'no-store',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                applyStatus(data.sms_test);
+            } catch (err) {
+                console.error('SMS test status poll failed', err);
+            }
+        }, 3000);
+    };
+
+    if (form && btn) {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Queuing…';
+            try {
+                const res = await fetch(form.action, {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    cache: 'no-store',
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.ok) {
+                    throw new Error(data.error || 'Failed to queue test SMS');
+                }
+                applyStatus(data.sms_test);
+            } catch (err) {
+                if (detailEl) detailEl.textContent = err.message || 'Failed to queue test SMS';
+                if (statusLabel) statusLabel.textContent = 'Failed';
+            } finally {
+                btn.disabled = {{ 'true' if saved_count < 1 else 'false' }};
+                btn.innerHTML = original;
+            }
+        });
+    }
+
+    applyStatus({{ sms_test|tojson }});
+});
+</script>
+{% endblock %}

@@ -1,57 +1,22 @@
 """
-Bloom risk assessment based on live sensor readings.
+Bloom risk assessment based on live sensor readings and configurable thresholds.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
-
-# Thresholds: (normal_min, normal_max, warning_low, warning_high, high triggers)
-SENSOR_THRESHOLDS = {
-    'temperature': {
-        'label': 'Temperature',
-        'unit': '°C',
-        'normal': (20.0, 30.0),
-        'warning': (15.0, 32.0),
-        'high_below': 15.0,
-        'high_above': 32.0,
-    },
-    'ph': {
-        'label': 'pH',
-        'unit': '',
-        'normal': (6.5, 8.5),
-        'warning': (6.0, 9.0),
-        'high_below': 6.0,
-        'high_above': 9.0,
-    },
-    'turbidity': {
-        'label': 'Turbidity',
-        'unit': ' NTU',
-        'normal': (0.0, 50.0),
-        'warning': (50.0, 100.0),
-        'high_above': 100.0,
-    },
-    'dissolved_oxygen': {
-        'label': 'Dissolved Oxygen',
-        'unit': ' mg/L',
-        'normal': (5.0, 14.0),
-        'warning': (3.0, 5.0),
-        'high_below': 3.0,
-    },
-    'salinity': {
-        'label': 'Salinity',
-        'unit': ' ppt',
-        'normal': (28.0, 36.0),
-        'warning': (25.0, 38.0),
-        'high_below': 25.0,
-        'high_above': 38.0,
-    },
-}
+from app.threshold_service import (
+    DEFAULT_THRESHOLDS,
+    SENSOR_ORDER,
+    classify_value,
+    get_thresholds,
+)
 
 LEVEL_SCORES = {
     'normal': 0,
     'warning': 1,
     'high': 2,
     'unknown': 0,
+    'disconnected': 0,
 }
 
 LEVEL_LABELS = {
@@ -59,96 +24,104 @@ LEVEL_LABELS = {
     'warning': 'Warning',
     'high': 'High Risk',
     'unknown': 'Unknown',
+    'disconnected': 'Disconnected',
 }
 
 OVERALL_MESSAGES = {
-    'normal': 'All monitored parameters are within safe coastal water thresholds.',
-    'warning': 'One or more parameters are outside normal range. Monitor closely.',
-    'high': 'Critical conditions detected. Possible algal bloom formation.',
+    'normal': 'All monitored parameters are within configured safe ranges.',
+    'warning': 'One or more parameters are in the warning band. Monitor closely.',
+    'high': 'Alert thresholds exceeded. Possible algal bloom conditions.',
 }
 
+CONNECTION_FLAGS = {
+    'temperature': 'temperature_connected',
+    'ph': 'ph_connected',
+    'turbidity': 'turbidity_connected',
+    'orp': 'orp_connected',
+    'ec': 'ec_connected',
+}
 
-def _assess_parameter(key: str, value: Optional[float]) -> Dict:
+# Kept for any legacy imports
+SENSOR_THRESHOLDS = DEFAULT_THRESHOLDS
+
+
+def _to_float(value) -> Optional[float]:
     if value is None:
-        return {
-            'key': key,
-            'name': SENSOR_THRESHOLDS.get(key, {}).get('label', key),
-            'value': None,
-            'level': 'unknown',
-            'label': 'No Data',
-        }
+        return None
+    if isinstance(value, str) and value.strip().lower() in {
+        'disconnected', 'offline', 'n/a', 'na', 'none', 'null', '',
+    }:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-    thresholds = SENSOR_THRESHOLDS.get(key)
-    if not thresholds:
-        return {
-            'key': key,
-            'name': key,
-            'value': value,
-            'level': 'unknown',
-            'label': 'Unknown',
-        }
 
-    normal_min, normal_max = thresholds['normal']
-    level = 'normal'
+def _sensor_connected(sensor_data: Dict, sensor_key: str) -> bool:
+    flag = CONNECTION_FLAGS.get(sensor_key)
+    if flag and flag in sensor_data:
+        return bool(sensor_data.get(flag))
+    return _to_float(sensor_data.get(sensor_key)) is not None
 
-    high_below = thresholds.get('high_below')
-    high_above = thresholds.get('high_above')
 
-    if high_below is not None and value < high_below:
-        level = 'high'
-    elif high_above is not None and value > high_above:
-        level = 'high'
-    elif value < normal_min or value > normal_max:
-        warn_min, warn_max = thresholds['warning']
-        if value < warn_min or value > warn_max:
-            level = 'high'
-        else:
-            level = 'warning'
-    else:
-        level = 'normal'
-
-    unit = thresholds.get('unit', '')
+def _format_display(key: str, value: float, unit: str) -> str:
     if key == 'temperature':
-        display = f'{value:.1f}{unit}'
-    elif key == 'ph':
-        display = f'{value:.1f}'
-    elif key == 'turbidity':
-        display = f'{value:.1f}{unit.strip()}'
-    else:
-        display = f'{value:.1f}{unit}'
+        return f'{value:.1f}{unit}'
+    if key == 'ph':
+        return f'{value:.2f}'
+    if key in ('turbidity', 'orp', 'ec'):
+        return f'{value:.1f}{unit.strip()}'
+    return f'{value:.1f}{unit}'
 
+
+def _assess_parameter(key: str, value: Optional[float], connected: bool, thresholds: Dict) -> Dict:
+    cfg = thresholds.get(key) or DEFAULT_THRESHOLDS.get(key, {})
+    name = cfg.get('label', key)
+    unit = cfg.get('unit', '')
+
+    if not connected or value is None:
+        return {
+            'key': key,
+            'name': name,
+            'value': None,
+            'display': 'Disconnected',
+            'level': 'disconnected',
+            'label': 'Disconnected',
+        }
+
+    level = classify_value(key, value, thresholds)
     return {
         'key': key,
-        'name': thresholds['label'],
+        'name': name,
         'value': value,
-        'display': display,
-        'level': level,
-        'label': LEVEL_LABELS[level],
+        'display': _format_display(key, value, unit),
+        'level': level if level != 'unknown' else 'unknown',
+        'label': LEVEL_LABELS.get(level, 'Unknown'),
     }
 
 
 def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
-    """Compute overall and per-parameter bloom risk from sensor readings."""
     if not sensor_data:
         return _empty_assessment()
 
-    parameters_to_check = [
-        ('temperature', sensor_data.get('temperature')),
-        ('ph', sensor_data.get('ph')),
-        ('turbidity', sensor_data.get('turbidity')),
+    thresholds = get_thresholds()
+    parameters = []
+    for key in SENSOR_ORDER:
+        connected = _sensor_connected(sensor_data, key)
+        value = _to_float(sensor_data.get(key)) if connected else None
+        parameters.append(_assess_parameter(key, value, connected, thresholds))
+
+    active_parameters = [
+        p for p in parameters
+        if p['level'] not in ('unknown', 'disconnected')
     ]
 
-    if sensor_data.get('has_do_sensor') and sensor_data.get('dissolved_oxygen') is not None:
-        parameters_to_check.append(('dissolved_oxygen', sensor_data.get('dissolved_oxygen')))
-
-    if sensor_data.get('has_salinity_sensor') and sensor_data.get('salinity') is not None:
-        parameters_to_check.append(('salinity', sensor_data.get('salinity')))
-
-    parameters = [_assess_parameter(key, value) for key, value in parameters_to_check]
-    active_parameters = [p for p in parameters if p['level'] != 'unknown']
-
     if not active_parameters:
-        return _empty_assessment()
+        empty = _empty_assessment()
+        empty['parameters'] = parameters
+        empty['message'] = 'Waiting for connected sensor data.'
+        return empty
 
     distribution = {'normal': 0, 'warning': 0, 'high': 0}
     max_score = 0
@@ -156,14 +129,13 @@ def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
 
     for param in active_parameters:
         distribution[param['level']] = distribution.get(param['level'], 0) + 1
-        score = LEVEL_SCORES[param['level']]
+        score = LEVEL_SCORES.get(param['level'], 0)
         if score > max_score:
             max_score = score
             overall_level = param['level']
 
     total = len(active_parameters)
     risk_score = round((max_score / 2) * 100 + (distribution.get('warning', 0) / total) * 15, 1)
-
     ui = _ui_for_level(overall_level)
 
     return {
@@ -179,6 +151,8 @@ def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
         'parameters': parameters,
         'distribution': distribution,
         'triggered': [p for p in active_parameters if p['level'] != 'normal'],
+        'disconnected': [p for p in parameters if p['level'] == 'disconnected'],
+        'thresholds': thresholds,
     }
 
 
@@ -189,24 +163,24 @@ def _ui_for_level(level: str) -> Dict:
             'card_class': 'text-white',
             'card_bg': 'bg-success',
             'dial_class': 'risk-dial-normal',
-            'dial_color': '#23C268',
-            'dial_bg': 'rgba(35, 194, 104, 0.12)',
+            'dial_color': '#1f8a5a',
+            'dial_bg': 'rgba(31, 138, 90, 0.12)',
         },
         'warning': {
             'label': 'Warning',
             'card_class': 'text-dark',
             'card_bg': 'bg-warning',
             'dial_class': 'risk-dial-warning',
-            'dial_color': '#F39C12',
-            'dial_bg': 'rgba(243, 156, 18, 0.12)',
+            'dial_color': '#c47a1a',
+            'dial_bg': 'rgba(196, 122, 26, 0.12)',
         },
         'high': {
             'label': 'High Risk',
             'card_class': 'text-white',
             'card_bg': 'bg-danger',
             'dial_class': 'risk-dial-high',
-            'dial_color': '#E74C3C',
-            'dial_bg': 'rgba(231, 76, 60, 0.12)',
+            'dial_color': '#c44536',
+            'dial_bg': 'rgba(196, 69, 54, 0.12)',
         },
     }
     return mapping.get(level, mapping['normal'])
@@ -227,4 +201,6 @@ def _empty_assessment() -> Dict:
         'parameters': [],
         'distribution': {'normal': 0, 'warning': 0, 'high': 0},
         'triggered': [],
+        'disconnected': [],
+        'thresholds': get_thresholds(),
     }
