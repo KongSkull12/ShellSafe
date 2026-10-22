@@ -28,7 +28,7 @@ SHELLSAFE/
 ├── firebase_config.py
 ├── config.py
 ├── requirements.txt
-├── app.py
+├── run.py
 └── app/
 ```
 
@@ -70,7 +70,7 @@ python -m flask init-db
 ### 4. Run the Application
 
 ```bash
-python app.py
+python run.py
 ```
 
 The application will start on `http://localhost:5000`
@@ -170,7 +170,7 @@ reset passwords for existing accounts. Never commit passwords to source control.
 - **app/models.py** - Converted models to Firestore-compatible classes
 - **app/auth/routes.py** - Updated authentication to use Firestore
 - **app/main/routes.py** - Converted all database queries to Firestore
-- **app.py** - Updated CLI commands for Firestore initialization
+- **run.py** - Updated CLI commands for Firestore initialization
 
 ### Removed Files
 - **.db files** - SQLite database files (no longer needed)
@@ -355,7 +355,7 @@ create_bloom_risk_analysis(risk_score, risk_level, ...)
 - [ ] `requirements.txt` installed (`pip install -r requirements.txt`)
 - [ ] Default users created (`python -m flask create-users`)
 - [ ] Sample alerts created (`python -m flask create-alerts`)
-- [ ] Application started (`python app.py`)
+- [ ] Application started (`python run.py`)
 - [ ] Tested admin login with the credentials configured for the admin account
 - [ ] Tested authority login with the credentials configured for the authority account
 - [ ] Verified alert creation/retrieval

@@ -14,7 +14,7 @@ SHELLSAFE/
 ├── serviceAccountKey.json  ← Your Firebase key
 ├── firebase_config.py
 ├── config.py
-├── app.py
+├── run.py
 └── app/
 ```
 
@@ -46,7 +46,7 @@ python -m flask init-db
 ## Step 4: Run the Application
 
 ```bash
-python app.py
+python run.py
 ```
 
 Navigate to `http://localhost:5000` in your browser.
@@ -78,7 +78,7 @@ python -m flask create-alerts
 python -m flask init-db
 
 # Run development server
-python app.py
+python run.py
 
 # Access Flask shell
 python -m flask shell
@@ -94,7 +94,7 @@ SHELLSAFE/
 ├── firebase_config.py              ✨ NEW - Firebase initialization
 ├── config.py                       ✏️ UPDATED - No SQLAlchemy
 ├── requirements.txt                ✏️ UPDATED - Firebase instead of SQLAlchemy
-├── app.py                          ✏️ UPDATED - Firestore commands
+├── run.py                          ✏️ UPDATED - Firestore commands
 ├── FIREBASE_MIGRATION_GUIDE.md     ✨ NEW - Complete migration guide
 ├── MIGRATION_SUMMARY.md            ✨ NEW - Changes summary
 ├── QUICK_START.md                  ✨ NEW - This file

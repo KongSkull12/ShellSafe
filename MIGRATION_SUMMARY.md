@@ -119,7 +119,7 @@ SQLALCHEMY_TRACK_MODIFICATIONS = False
 - `/reports/restore/<id>` - Report restoration
 - `/reports/permanent_delete/<id>` - Permanent report deletion
 
-### 7. **app.py**
+### 7. **run.py**
 **Changes:**
 - Removed: SQLAlchemy imports and operations
 - Added: Firestore service imports
@@ -224,7 +224,7 @@ python -m flask init-db
 
 ### 4. Run Application
 ```bash
-python app.py
+python run.py
 ```
 
 ---
