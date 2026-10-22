@@ -36,8 +36,6 @@ def create_app(config_class=None):
             initialize_firebase()
             get_firestore_service()
         except Exception as e:
-            if os.environ.get('VERCEL') == '1':
-                raise
             app.logger.warning(f"Firebase initialization: {str(e)}")
     
     from app.auth import bp as auth_bp
