@@ -1,56 +1,18 @@
-{% extends "authority_base.html" %}
+{% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Notifications</p>
-            <h1>Alert center</h1>
-        </div>
-    </header>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert ss-flash alert-{{ 'danger' if category == 'error' else category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    <ul class="nav nav-pills mb-3" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#pills-all" type="button">All</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pills-unread" type="button">Unread</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pills-risk" type="button">Risk</button>
-        </li>
-    </ul>
-
-    <div class="tab-content">
-        <div class="tab-pane fade show active" id="pills-all">
-            {% for alert in alerts %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No alerts found.</div>
-            {% endfor %}
-        </div>
-        <div class="tab-pane fade" id="pills-unread">
-            {% for alert in alerts if alert.status == 'Unread' %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No unread alerts.</div>
-            {% endfor %}
-        </div>
-        <div class="tab-pane fade" id="pills-risk">
-            {% for alert in alerts if alert.alert_type == 'RISK' %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No risk alerts.</div>
-            {% endfor %}
-        </div>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Bloom-risk alerts</h1>
+        <p>Raised automatically when a live probe crosses its alert threshold.</p>
     </div>
+</div>
+
+{{ flashes() }}
+
+<div>
+    {% set show_system = false %}
+    {% include "_alerts_tabs.html" %}
 </div>
 {% endblock %}

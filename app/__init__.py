@@ -15,8 +15,16 @@ def create_app(config_class=None):
     if config_class:
         app.config.from_object(config_class)
     else:
-        # Default config
-        app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'you-will-never-guess'
+        secret_key = os.environ.get('SECRET_KEY')
+        if os.environ.get('VERCEL') == '1' and not secret_key:
+            raise RuntimeError('Set SECRET_KEY in the Vercel project environment.')
+        app.config['SECRET_KEY'] = secret_key or 'you-will-never-guess'
+        if os.environ.get('VERCEL') == '1':
+            app.config.update(
+                SESSION_COOKIE_SECURE=True,
+                SESSION_COOKIE_HTTPONLY=True,
+                SESSION_COOKIE_SAMESITE='Lax',
+            )
     
     login_manager.init_app(app)
     
@@ -28,6 +36,8 @@ def create_app(config_class=None):
             initialize_firebase()
             get_firestore_service()
         except Exception as e:
+            if os.environ.get('VERCEL') == '1':
+                raise
             app.logger.warning(f"Firebase initialization: {str(e)}")
     
     from app.auth import bp as auth_bp
@@ -35,6 +45,23 @@ def create_app(config_class=None):
 
     from app.main import bp as main_bp
     app.register_blueprint(main_bp)
+
+    @app.before_request
+    def _start_sensor_sampler():
+        # Started on the first request so the debug reloader's parent process
+        # (which never serves) does not poll Firebase too.
+        # Vercel functions are short-lived and must not own a background worker.
+        if os.environ.get('VERCEL') == '1' or os.environ.get('SENSOR_SAMPLER', '1') == '0':
+            return
+        from app.realtime_db_service import start_sensor_sampler
+        from app.risk_service import assess_bloom_risk
+        from app.live_alert_sync import sync_live_alerts
+
+        def on_sample(reading):
+            if reading and reading.get('is_online'):
+                sync_live_alerts(reading, assess_bloom_risk(reading))
+
+        start_sensor_sampler(on_sample=on_sample)
 
     @app.context_processor
     def inject_unread_alert_count():
@@ -48,5 +75,17 @@ def create_app(config_class=None):
             count = 0
         return {'unread_alert_count': count}
 
-    return app
+    @app.context_processor
+    def inject_shell_live():
+        # Every logged-in page paints the hull stripe from real state on first
+        # render; pages that already built a payload pass their own `live`.
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return {}
+        try:
+            from app.sensor_view import build_live_payload
+            return {'shell_live': build_live_payload()}
+        except Exception:
+            return {'shell_live': None}
 
+    return app

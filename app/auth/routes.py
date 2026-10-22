@@ -19,13 +19,9 @@ def login():
         user = User.get_by_email(form.email.data)
         
         if user is None or not user.check_password(form.password.data):
-            flash('Invalid email or password')
+            flash('That email and password do not match an account. Check both and try again.', 'error')
             return redirect(url_for('auth.login'))
         
-        if user.role != form.role.data:
-            flash('Selected role does not match account privileges.')
-            return redirect(url_for('auth.login'))
-
         login_user(user, remember=form.remember_me.data)
         
         if user.role == 'admin':

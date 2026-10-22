@@ -1,61 +1,53 @@
 {% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Exports</p>
-            <h1>Deleted reports</h1>
-        </div>
-        <div class="dash-toolbar">
-            <a href="{{ url_for('main.reports') }}" class="ss-btn-ghost">Active reports</a>
-            <a href="{{ url_for('main.deleted_reports_view') }}" class="ss-btn-primary">Recently deleted</a>
-        </div>
-    </header>
-
-    <div class="ss-table-wrap">
-        <div class="table-responsive">
-            <table class="table align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th>Report</th>
-                        <th>Type</th>
-                        <th>Deleted</th>
-                        <th>By</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for report in reports %}
-                    {% set rid = report.id or report.report_id %}
-                    <tr>
-                        <td class="fw-semibold">{{ report.report_name }}</td>
-                        <td><span class="ss-chip">{{ report.report_type }}</span></td>
-                        <td>{{ report.deleted_date.strftime('%b %d, %Y %I:%M %p') if report.deleted_date else '—' }}</td>
-                        <td>{{ report.deleted_by or '—' }}</td>
-                        <td>
-                            <div class="dash-toolbar">
-                                <form action="{{ url_for('main.restore_report', report_id=rid) }}" method="POST">
-                                    <button type="submit" class="ss-btn-soft btn-sm" title="Restore"><i class="bi bi-arrow-counterclockwise"></i></button>
-                                </form>
-                                <form action="{{ url_for('main.delete_report_permanently', report_id=rid) }}" method="POST"
-                                      data-confirm="Permanently delete this report? This cannot be undone."
-                                      data-confirm-title="Permanent delete"
-                                      data-confirm-action="Delete forever"
-                                      data-confirm-danger="true">
-                                    <button type="submit" class="ss-btn-danger btn-sm" title="Delete permanently"><i class="bi bi-trash-fill"></i></button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="5" class="text-center text-muted py-5">Trash is empty.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Deleted reports</h1>
+        <p>Restore a report, or delete it for good.</p>
+    </div>
+    <div class="actions">
+        <a href="{{ url_for('main.reports') }}" class="btn btn-quiet"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back to reports</a>
     </div>
 </div>
+
+{{ flashes() }}
+
+{% if reports %}
+<section class="panel">
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr><th>Report</th><th>Type</th><th>Deleted</th><th>By</th><th><span class="visually-hidden">Actions</span></th></tr>
+            </thead>
+            <tbody>
+                {% for report in reports %}
+                {% set rid = report.id or report.report_id %}
+                <tr>
+                    <td class="strong">{{ report.report_name }}</td>
+                    <td><span class="tag">{{ report.report_type }}</span></td>
+                    <td class="muted">{{ report.deleted_date.strftime('%b %d, %Y · %I:%M %p') if report.deleted_date else '—' }}</td>
+                    <td class="muted">{{ report.deleted_by or '—' }}</td>
+                    <td class="num">
+                        <div class="actions" style="justify-content: flex-end; flex-wrap: nowrap;">
+                            <form action="{{ url_for('main.restore_report', report_id=rid) }}" method="POST">
+                                <button type="submit" class="btn btn-quiet btn-sm"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+                            </form>
+                            <form action="{{ url_for('main.delete_report_permanently', report_id=rid) }}" method="POST"
+                                  data-confirm="This report will be removed permanently. This can't be undone."
+                                  data-confirm-title="Delete forever?" data-confirm-action="Delete forever" data-confirm-danger="true">
+                                <button type="submit" class="btn btn-ghost btn-icon" aria-label="Delete {{ report.report_name }} forever"><i class="bi bi-x-lg"></i></button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+<div class="empty"><i class="bi bi-trash3" aria-hidden="true"></i><strong>Trash is empty</strong>Deleted reports are kept here until you remove them for good.</div>
+{% endif %}
 {% endblock %}

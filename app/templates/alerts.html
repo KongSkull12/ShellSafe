@@ -1,75 +1,29 @@
 {% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Notifications</p>
-            <h1>Alert center</h1>
-        </div>
-        <div class="dash-toolbar">
-            <form action="{{ url_for('main.mark_all_read') }}" method="POST">
-                <button type="submit" class="ss-btn-primary"><i class="bi bi-check-all"></i> Mark all read</button>
-            </form>
-            <form action="{{ url_for('main.clear_old') }}" method="POST" data-confirm="Clear all read alerts from the active list?" data-confirm-title="Clear read alerts" data-confirm-action="Clear">
-                <button type="submit" class="ss-btn-ghost"><i class="bi bi-trash"></i> Clear read</button>
-            </form>
-            <a href="{{ url_for('main.recently_deleted') }}" class="ss-btn-soft"><i class="bi bi-archive"></i> Recently deleted</a>
-        </div>
-    </header>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert ss-flash alert-{{ 'danger' if category == 'error' else category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="pills-all-tab" data-bs-toggle="pill" data-bs-target="#pills-all" type="button" role="tab">All</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="pills-unread-tab" data-bs-toggle="pill" data-bs-target="#pills-unread" type="button" role="tab">Unread</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="pills-risk-tab" data-bs-toggle="pill" data-bs-target="#pills-risk" type="button" role="tab">Risk</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="pills-system-tab" data-bs-toggle="pill" data-bs-target="#pills-system" type="button" role="tab">System</button>
-        </li>
-    </ul>
-
-    <div class="tab-content" id="pills-tabContent">
-        <div class="tab-pane fade show active" id="pills-all" role="tabpanel">
-            {% for alert in alerts %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No alerts yet.</div>
-            {% endfor %}
-        </div>
-        <div class="tab-pane fade" id="pills-unread" role="tabpanel">
-            {% for alert in alerts if alert.status == 'Unread' %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No unread alerts.</div>
-            {% endfor %}
-        </div>
-        <div class="tab-pane fade" id="pills-risk" role="tabpanel">
-            {% for alert in alerts if alert.alert_type == 'RISK' %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No risk alerts.</div>
-            {% endfor %}
-        </div>
-        <div class="tab-pane fade" id="pills-system" role="tabpanel">
-            {% for alert in alerts if alert.is_system %}
-                {% include '_alert_card.html' %}
-            {% else %}
-                <div class="ss-empty">No system alerts.</div>
-            {% endfor %}
-        </div>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Alerts</h1>
+        <p>{{ unread_alert_count }} unread · raised automatically when a live probe crosses its alert threshold.</p>
     </div>
+    <div class="actions">
+        <form action="{{ url_for('main.mark_all_read') }}" method="POST">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check2-all" aria-hidden="true"></i> Mark all read</button>
+        </form>
+        <form action="{{ url_for('main.clear_old') }}" method="POST"
+              data-confirm="Read alerts move to Recently deleted, where you can restore them."
+              data-confirm-title="Clear read alerts?" data-confirm-action="Clear read alerts">
+            <button type="submit" class="btn btn-quiet"><i class="bi bi-trash3" aria-hidden="true"></i> Clear read</button>
+        </form>
+        <a href="{{ url_for('main.recently_deleted') }}" class="btn btn-ghost"><i class="bi bi-archive" aria-hidden="true"></i> Recently deleted</a>
+    </div>
+</div>
+
+{{ flashes() }}
+
+<div>
+    {% set show_system = true %}
+    {% include "_alerts_tabs.html" %}
 </div>
 {% endblock %}

@@ -1,6 +1,8 @@
 from app import create_app
 from app.models import User, Alert
 from app.firestore_service import get_firestore_service
+import os
+import click
 
 app = create_app()
 
@@ -10,28 +12,37 @@ def make_shell_context():
 
 @app.cli.command("create-users")
 def create_users():
-    """Create default user accounts in Firestore."""
+    """Create initial user accounts using credentials from the environment."""
+    required = ('ADMIN_EMAIL', 'ADMIN_PASSWORD', 'AUTHORITY_EMAIL', 'AUTHORITY_PASSWORD')
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise click.ClickException(
+            'Set these environment variables before creating users: ' + ', '.join(missing)
+        )
+
     db = get_firestore_service()
     
     # Check if admin user already exists
-    admin_user = User.get_by_email('system.admin@gmail.com')
+    admin_email = os.environ['ADMIN_EMAIL']
+    admin_user = User.get_by_email(admin_email)
     if not admin_user:
-        admin = User(email='system.admin@gmail.com', role='admin')
-        admin.set_password('admin123')
+        admin = User(email=admin_email, role='admin')
+        admin.set_password(os.environ['ADMIN_PASSWORD'])
         admin.save()
-        print("Admin user created: system.admin@gmail.com")
+        print(f"Admin user created: {admin_email}")
     else:
-        print("Admin user already exists.")
+        print(f"Admin user already exists: {admin_email}")
 
     # Check if authority user already exists
-    authority_user = User.get_by_email('coastal.auth@gmail.com')
+    authority_email = os.environ['AUTHORITY_EMAIL']
+    authority_user = User.get_by_email(authority_email)
     if not authority_user:
-        authority = User(email='coastal.auth@gmail.com', role='authority')
-        authority.set_password('coast123')
+        authority = User(email=authority_email, role='authority')
+        authority.set_password(os.environ['AUTHORITY_PASSWORD'])
         authority.save()
-        print("Authority user created: coastal.auth@gmail.com")
+        print(f"Authority user created: {authority_email}")
     else:
-        print("Authority user already exists.")
+        print(f"Authority user already exists: {authority_email}")
 
 @app.cli.command("create-alerts")
 def create_alerts():

@@ -6,6 +6,7 @@ Initializes Firebase Admin SDK with Firestore and Realtime Database.
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
+import json
 import os
 
 # Path to your Firebase service account JSON key
@@ -32,14 +33,23 @@ def initialize_firebase():
     try:
         # Check if Firebase has already been initialized
         if not firebase_admin._apps:
-            # Initialize Firebase with service account credentials
-            if not os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
+            credentials_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
+            if credentials_json:
+                try:
+                    service_account_info = json.loads(credentials_json)
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        "FIREBASE_CREDENTIALS_JSON must contain valid service-account JSON."
+                    ) from e
+                cred = credentials.Certificate(service_account_info)
+            elif os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
+                cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+            else:
                 raise FileNotFoundError(
-                    f"Firebase service account key not found at {SERVICE_ACCOUNT_KEY_PATH}. "
-                    "Please place your 'serviceAccountKey.json' file in the project root."
+                    "Firebase credentials are missing. Set FIREBASE_CREDENTIALS_JSON "
+                    "or provide a local serviceAccountKey.json file."
                 )
-            
-            cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+
             firebase_admin.initialize_app(cred, {
                 'databaseURL': DATABASE_URL,
             })

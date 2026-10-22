@@ -1,4 +1,5 @@
 {% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block styles %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -6,306 +7,165 @@
 {% endblock %}
 
 {% block content %}
-{% set device_id = sensor_data.device_id if sensor_data else 'SH-001' %}
-{% set device_name = sensor_data.device_name if sensor_data else 'ShellSafe_T-Call' %}
-{% set is_online = is_online|default(false) %}
-{% set last_update = sensor_data.last_update if sensor_data else 'No data' %}
-
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Hardware</p>
-            <h1>Devices</h1>
-            <p class="text-muted mb-0 mt-1">T-Call A7670 node · per-sensor connection status</p>
-        </div>
-        <button class="ss-btn-ghost" id="refreshSensorData" type="button">
-            <i class="bi bi-broadcast"></i> <span id="liveDataBadge">Live</span>
-        </button>
-    </header>
-
-    <div
-        class="alert ss-flash {% if not sensor_data or not is_online %}alert-warning{% else %}alert-success{% endif %} {% if sensor_data and is_online %}d-none{% endif %}"
-        id="deviceDataAlert"
-    >
-        {% if not sensor_data %}
-            No live sensor data in Firebase. Ensure the device is publishing to <code>/device_data</code>.
-        {% elif not is_online %}
-            Device data looks stale — marked offline until fresh readings arrive.
-        {% else %}
-            Device is online and sending live data.
-        {% endif %}
+{% set d = sensor_data or {} %}
+{% set gps_fix = d.get('gps_fix') %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Node {{ live.link.device_id or 'SH-001' }}</h1>
+        <p>{{ d.get('device_name') or 'T-Call A7670' }} · probe status, connectivity and location</p>
     </div>
-
-    {% set gps_fix = sensor_data.gps_fix if sensor_data else false %}
-    {% set gps_lat = sensor_data.latitude if sensor_data and sensor_data.gps_fix else none %}
-    {% set gps_lon = sensor_data.longitude if sensor_data and sensor_data.gps_fix else none %}
-
-    <div class="ss-stat-grid">
-        <div class="ss-stat">
-            <span class="label">Devices</span>
-            <p class="value">1 active</p>
-        </div>
-        <div class="ss-stat">
-            <span class="label">Online</span>
-            <p class="value" id="onlineDevicesText">{{ '1 online' if is_online else '0 online' }}</p>
-        </div>
-        <div class="ss-stat">
-            <span class="label">GPS</span>
-            <p class="value" id="gpsFixStat">{{ 'Fix' if gps_fix else 'No fix' }}</p>
-        </div>
-        <div class="ss-stat">
-            <span class="label">Signal</span>
-            <p class="value {{ 'text-success' if is_online else 'text-secondary' }}" id="signalStatusText">{{ 'Connected' if is_online else 'Offline' }}</p>
-        </div>
+    <div class="actions">
+        <button class="btn btn-quiet" type="button" id="checkNow"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Check now</button>
     </div>
-    <span id="onlineDot" class="d-none"></span>
-    <span id="signalIcon" class="d-none"></span>
+</div>
 
-    <section class="ss-panel mb-3">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <h2 class="mb-0">GPS tracking</h2>
-            <span class="ss-chip {{ 'ss-chip-ok' if gps_fix else '' }}" id="gpsStatusChip">
-                {{ 'Live fix' if gps_fix else ('Searching…' if sensor_data and sensor_data.gps_enabled else 'GPS off') }}
-            </span>
+{% if not sensor_data %}
+<div class="flash flash-warning" role="status">
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <p>No reading has reached Firebase yet. Check that the device is powered and publishing to <code>/device_data</code>.</p>
+</div>
+{% endif %}
+
+<div class="split">
+    <section class="panel" aria-labelledby="probesTitle">
+        <div class="panel-head">
+            <div>
+                <h2 id="probesTitle">Probes</h2>
+                <p>Signal is the raw voltage on each analog pin (temperature shows DS18B20s found on the bus). A plugged-in probe usually reads 0.3&ndash;3.0 V; near 0 V means no signal, about 3.3 V means the sensor's output is too high for the ESP32.</p>
+            </div>
         </div>
-        <div class="ss-split">
-            <div>
-                <div class="d-flex flex-column gap-2 mb-3">
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Latitude</span>
-                        <strong id="gpsLatitude">{{ '%.6f'|format(gps_lat) if gps_lat is not none else '—' }}</strong>
-                    </div>
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Longitude</span>
-                        <strong id="gpsLongitude">{{ '%.6f'|format(gps_lon) if gps_lon is not none else '—' }}</strong>
-                    </div>
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Altitude</span>
-                        <strong id="gpsAltitude">{% if sensor_data and sensor_data.altitude_m is not none %}{{ '%.1f'|format(sensor_data.altitude_m) }} m{% else %}—{% endif %}</strong>
-                    </div>
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Speed</span>
-                        <strong id="gpsSpeed">{% if sensor_data and sensor_data.speed_kmh is not none %}{{ '%.1f'|format(sensor_data.speed_kmh) }} km/h{% else %}—{% endif %}</strong>
-                    </div>
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Satellites</span>
-                        <strong id="gpsSatellites">{{ sensor_data.satellites if sensor_data and sensor_data.gps_fix else '—' }}</strong>
-                    </div>
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-muted">Accuracy</span>
-                        <strong id="gpsAccuracy">{% if sensor_data and sensor_data.gps_accuracy_m is not none %}{{ '%.1f'|format(sensor_data.gps_accuracy_m) }} m{% else %}—{% endif %}</strong>
-                    </div>
-                </div>
-                <a class="ss-btn-primary {% if not gps_fix %}disabled{% endif %}" id="gpsMapsLink"
-                   href="{{ sensor_data.maps_url if sensor_data and sensor_data.maps_url else '#' }}"
-                   target="_blank" rel="noopener">
-                    <i class="bi bi-geo-alt"></i> Open in OpenStreetMap
-                </a>
-                <p class="small text-muted mt-2 mb-0">
-                    Needs an active GPS antenna on the T-Call GPS connector. First fix can take 1–2 minutes outdoors.
-                </p>
-            </div>
-            <div>
-                <div id="deviceMap" class="ss-device-map" aria-label="Device GPS map"
-                     data-lat="{{ gps_lat if gps_lat is not none else '' }}"
-                     data-lon="{{ gps_lon if gps_lon is not none else '' }}"></div>
-                <p class="small text-muted mt-2 mb-0 text-center" id="gpsMapHint">
-                    {% if gps_fix %}Exact device position{% else %}Waiting for GNSS fix…{% endif %}
-                </p>
-            </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Probe</th><th>Status</th><th class="num">Signal</th><th class="num">Reading</th></tr></thead>
+                <tbody>
+                    {% for s in live.sensors %}
+                    <tr data-sensor-row="{{ s.key }}">
+                        <td class="strong">{{ s.label }}</td>
+                        <td><span class="state" data-sensor-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ s.state_label }}</span></td>
+                        <td class="num muted" data-sensor-signal>{% if s.key == 'temperature' %}{% if d.get('ds18b20_count') is not none %}{{ d.get('ds18b20_count') }} on bus{% else %}—{% endif %}{% elif (d.get('probe_voltage') or {}).get(s.key) is not none %}{{ '%.3f'|format(d.get('probe_voltage')[s.key]) }} V{% else %}—{% endif %}</td>
+                        <td class="num" data-sensor-reading>{% if s.state == 'live' %}{{ s.display }} {{ s.unit }}{% elif s.last_display %}last {{ s.last_display }} {{ s.unit }}{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </section>
 
-    <div class="ss-split mb-3">
-        <section class="ss-panel">
-            <h2>Device health</h2>
-            <h3 class="h4 fw-bold mt-2 mb-2" style="font-family: var(--ss-font-display); color: var(--primary-blue);">{{ device_id }}</h3>
-            <span class="ss-chip {{ 'ss-chip-ok' if is_online else '' }}" id="deviceStatusBadge">
-                <span class="rounded-circle bg-{{ 'success' if is_online else 'secondary' }} me-2 d-inline-block" style="width: 8px; height: 8px;" id="deviceStatusBadgeDot"></span>
-                <span id="deviceStatusBadgeText">{{ 'ONLINE' if is_online else 'OFFLINE' }}</span>
-            </span>
-            <div class="mt-3 d-flex flex-column gap-2">
-                <div class="d-flex justify-content-between"><span class="text-muted">Name</span><strong class="text-break-anywhere">{{ device_name }}</strong></div>
-                <div class="d-flex justify-content-between"><span class="text-muted">Status</span><strong id="deviceStatusText">{{ 'Online' if is_online else 'Offline' }}</strong></div>
-                <div class="d-flex justify-content-between"><span class="text-muted">Last update</span><strong class="text-break-anywhere" id="lastUpdateText">{{ last_update }}</strong></div>
-            </div>
-        </section>
-
-        <section class="ss-metric-strip" style="margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr));">
-            <article class="ss-metric">
-                <span class="ss-metric-label">Temperature</span>
-                <strong id="temperatureReading">{% if sensor_data and sensor_data.temperature_connected and sensor_data.temperature is not none %}{{ '%.1f'|format(sensor_data.temperature) }}°C{% else %}Disconnected{% endif %}</strong>
-            </article>
-            <article class="ss-metric">
-                <span class="ss-metric-label">pH</span>
-                <strong id="phReading">{% if sensor_data and sensor_data.ph_connected and sensor_data.ph is not none %}{{ '%.2f'|format(sensor_data.ph) }}{% else %}Disconnected{% endif %}</strong>
-            </article>
-            <article class="ss-metric">
-                <span class="ss-metric-label">Turbidity</span>
-                <strong id="turbidityReading">{% if sensor_data and sensor_data.turbidity_connected and sensor_data.turbidity is not none %}{{ '%.1f'|format(sensor_data.turbidity) }} NTU{% else %}Disconnected{% endif %}</strong>
-            </article>
-            <article class="ss-metric">
-                <span class="ss-metric-label">ORP</span>
-                <strong id="orpReading">{% if sensor_data and sensor_data.orp_connected and sensor_data.orp is not none %}{{ '%.1f'|format(sensor_data.orp) }} mV{% else %}Disconnected{% endif %}</strong>
-            </article>
-            <article class="ss-metric" style="grid-column: 1 / -1;">
-                <span class="ss-metric-label">EC</span>
-                <strong id="ecReading">{% if sensor_data and sensor_data.ec_connected and sensor_data.ec is not none %}{{ '%.1f'|format(sensor_data.ec) }} µS/cm{% else %}Disconnected{% endif %}</strong>
-            </article>
-        </section>
-    </div>
-
-    <div class="ss-split">
-        <section class="ss-panel">
-            <h2>Sensor status</h2>
-            <div class="table-responsive mt-2">
-                <table class="table ss-table mb-2">
-                    <thead>
-                        <tr>
-                            <th>Sensor</th>
-                            <th>Status</th>
-                            <th>Reading</th>
-                        </tr>
-                    </thead>
-                    <tbody id="sensorStatusBody">
-                        {% if sensor_statuses %}
-                            {% for sensor in sensor_statuses %}
-                            <tr>
-                                <td>{{ sensor.name }}</td>
-                                <td>
-                                    <span class="d-flex align-items-center">
-                                        <span class="rounded-circle bg-{{ sensor.status_class }} me-2" style="width: 8px; height: 8px;"></span>
-                                        {{ sensor.status }}
-                                    </span>
-                                </td>
-                                <td>{{ sensor.reading }}</td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr><td colspan="3" class="text-muted">No sensor data</td></tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-            <div class="d-flex gap-3 small fw-semibold">
-                <span><span class="rounded-circle bg-success d-inline-block me-1" style="width:8px;height:8px;"></span> Active</span>
-                <span><span class="rounded-circle bg-secondary d-inline-block me-1" style="width:8px;height:8px;"></span> Disconnected</span>
-            </div>
-        </section>
-
-        <section class="ss-panel">
-            <h2>Device snapshot</h2>
-            <div class="table-responsive mt-2">
-                <table class="table ss-table mb-0">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>pH</th>
-                            <th>Temp</th>
-                            <th>Status</th>
-                            <th>Updated</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>{{ device_id }}</td>
-                            <td id="phTableReading">{% if sensor_data and sensor_data.ph_connected and sensor_data.ph is not none %}{{ '%.2f'|format(sensor_data.ph) }}{% else %}Disconnected{% endif %}</td>
-                            <td id="tempTableReading">{% if sensor_data and sensor_data.temperature_connected and sensor_data.temperature is not none %}{{ '%.1f'|format(sensor_data.temperature) }}°C{% else %}Disconnected{% endif %}</td>
-                            <td id="deviceStatusTable">{{ 'Online' if is_online else 'Offline' }}</td>
-                            <td id="lastUpdateTable">{{ last_update }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    </div>
+    <section class="panel" aria-labelledby="linkTitle">
+        <div class="panel-head"><h2 id="linkTitle">Connection</h2></div>
+        <dl class="kv">
+            <div><dt>Device name</dt><dd data-live-field="device_name">{{ d.get('device_name') or '—' }}</dd></div>
+            <div><dt>SIM ready</dt><dd>{{ {True: 'Yes', False: 'No'}.get(d.get('sim_ready'), '—') }}</dd></div>
+            <div><dt>GSM network</dt><dd>{{ {True: 'Registered', False: 'Not registered'}.get(d.get('gsm_network'), '—') }}</dd></div>
+            <div><dt>GSM signal</dt><dd data-live-field="gsm_signal">{{ d.get('gsm_signal') if d.get('gsm_signal') is not none else '—' }}</dd></div>
+            <div><dt>Uptime</dt><dd id="uptimeText">{% if d.get('uptime_seconds') is not none %}{{ (d.get('uptime_seconds') // 3600)|int }} h {{ ((d.get('uptime_seconds') % 3600) // 60)|int }} min{% else %}—{% endif %}</dd></div>
+            <div><dt>Offline after</dt><dd>{{ live.link.timeout_seconds or 30 }} s without a publish</dd></div>
+        </dl>
+    </section>
 </div>
+
+<section class="panel" aria-labelledby="gpsTitle">
+    <div class="panel-head">
+        <div>
+            <h2 id="gpsTitle">Location</h2>
+            <p>Needs the GPS antenna on the T-Call. A first fix can take 1–2 minutes outdoors.</p>
+        </div>
+        <span class="tag {{ 'tag-ok' if gps_fix else '' }}" id="gpsStatusChip">{{ 'GPS fix' if gps_fix else ('Searching for fix' if d.get('gps_enabled') else 'GPS off') }}</span>
+    </div>
+    <div class="split">
+        <div id="deviceMap" class="map" role="img" aria-label="Map of the device position"
+             data-lat="{{ d.get('latitude') if gps_fix and d.get('latitude') is not none else '' }}"
+             data-lon="{{ d.get('longitude') if gps_fix and d.get('longitude') is not none else '' }}"></div>
+        <div>
+            <dl class="kv">
+                <div><dt>Latitude</dt><dd id="gpsLatitude">{{ '%.6f'|format(d.get('latitude')) if gps_fix else '—' }}</dd></div>
+                <div><dt>Longitude</dt><dd id="gpsLongitude">{{ '%.6f'|format(d.get('longitude')) if gps_fix else '—' }}</dd></div>
+                <div><dt>Altitude</dt><dd id="gpsAltitude">{{ '%.1f m'|format(d.get('altitude_m')) if gps_fix and d.get('altitude_m') is not none else '—' }}</dd></div>
+                <div><dt>Speed</dt><dd id="gpsSpeed">{{ '%.1f km/h'|format(d.get('speed_kmh')) if gps_fix and d.get('speed_kmh') is not none else '—' }}</dd></div>
+                <div><dt>Satellites</dt><dd id="gpsSatellites">{{ d.get('satellites') if gps_fix else '—' }}</dd></div>
+                <div><dt>Accuracy</dt><dd id="gpsAccuracy">{{ '%.1f m'|format(d.get('gps_accuracy_m')) if gps_fix and d.get('gps_accuracy_m') is not none else '—' }}</dd></div>
+            </dl>
+            <a class="btn btn-quiet" id="gpsMapsLink" style="margin-top: 14px;" target="_blank" rel="noopener"
+               href="{{ d.get('maps_url') if gps_fix and d.get('maps_url') else '#' }}" {% if not gps_fix %}aria-disabled="true"{% endif %}>
+                <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open in OpenStreetMap
+            </a>
+        </div>
+    </div>
+</section>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    (function initDeviceMap() {
-        const mapEl = document.getElementById('deviceMap');
-        if (!mapEl || typeof L === 'undefined') return;
+(function () {
+    const mapEl = document.getElementById('deviceMap');
+    const PH_CENTER = [12.8797, 121.774];
+    let map = null;
+    let marker = null;
 
-        const latAttr = mapEl.dataset.lat;
-        const lonAttr = mapEl.dataset.lon;
-        const initialLat = latAttr !== '' && latAttr != null ? Number(latAttr) : null;
-        const initialLon = lonAttr !== '' && lonAttr != null ? Number(lonAttr) : null;
-        const defaultCenter = [12.8797, 121.7740];
-        const hasFix = initialLat != null && initialLon != null
-            && !Number.isNaN(initialLat) && !Number.isNaN(initialLon);
+    function toNum(v) { return v === '' || v == null ? null : Number(v); }
 
-        const map = L.map(mapEl, {
-            zoomControl: true,
-            attributionControl: true,
-        }).setView(hasFix ? [initialLat, initialLon] : defaultCenter, hasFix ? 15 : 5);
-
+    if (mapEl && typeof L !== 'undefined') {
+        map = L.map(mapEl, { scrollWheelZoom: false }).setView(PH_CENTER, 5);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap',
+            maxZoom: 19, attribution: '&copy; OpenStreetMap',
         }).addTo(map);
+        setTimeout(function () { map.invalidateSize(); }, 200);
+    }
 
-        let marker = null;
-        const setPosition = (lat, lon) => {
-            if (lat == null || lon == null || Number.isNaN(lat) || Number.isNaN(lon)) {
-                if (marker) {
-                    map.removeLayer(marker);
-                    marker = null;
-                }
-                map.setView(defaultCenter, 5);
-                return;
-            }
-            const latLng = [lat, lon];
-            if (!marker) {
-                marker = L.marker(latLng).addTo(map);
-                marker.bindPopup('ShellSafe device');
-            } else {
-                marker.setLatLng(latLng);
-            }
-            map.setView(latLng, Math.max(map.getZoom(), 15));
-        };
-
-        if (hasFix) setPosition(initialLat, initialLon);
-
-        window.ShellSafeDeviceMap = {
-            update(lat, lon) {
-                setPosition(lat, lon);
-            }
-        };
-
-        setTimeout(() => map.invalidateSize(), 200);
-    })();
-
-    document.addEventListener('sensor-data-update', function(event) {
-        if (window.ShellSafeSensor) {
-            window.ShellSafeSensor.updateDevicesPage(event.detail);
+    function setPosition(lat, lon) {
+        if (!map) return;
+        if (lat == null || lon == null || Number.isNaN(lat) || Number.isNaN(lon)) {
+            if (marker) { map.removeLayer(marker); marker = null; }
+            return;
         }
+        if (!marker) marker = L.marker([lat, lon]).addTo(map).bindPopup('ShellSafe node');
+        else marker.setLatLng([lat, lon]);
+        map.setView([lat, lon], Math.max(map.getZoom(), 15));
+    }
+    setPosition(toNum(mapEl?.dataset.lat), toNum(mapEl?.dataset.lon));
+
+    const fmt = function (v, unit, d) { return v == null ? '—' : `${Number(v).toFixed(d)}${unit}`; };
+    const set = function (id, text) { const el = document.getElementById(id); if (el) el.textContent = text; };
+
+    document.addEventListener('shellsafe:live', function (event) {
+        const d = event.detail.payload.sensor_data || {};
+        const fix = Boolean(d.gps_fix && d.latitude != null && d.longitude != null);
+        set('gpsLatitude', fix ? fmt(d.latitude, '', 6) : '—');
+        set('gpsLongitude', fix ? fmt(d.longitude, '', 6) : '—');
+        set('gpsAltitude', fix ? fmt(d.altitude_m, ' m', 1) : '—');
+        set('gpsSpeed', fix ? fmt(d.speed_kmh, ' km/h', 1) : '—');
+        set('gpsSatellites', fix ? String(d.satellites || 0) : '—');
+        set('gpsAccuracy', fix ? fmt(d.gps_accuracy_m, ' m', 1) : '—');
+        if (d.uptime_seconds != null) {
+            const u = Number(d.uptime_seconds);
+            set('uptimeText', `${Math.floor(u / 3600)} h ${Math.floor((u % 3600) / 60)} min`);
+        }
+        const chip = document.getElementById('gpsStatusChip');
+        if (chip) {
+            chip.classList.toggle('tag-ok', fix);
+            chip.textContent = fix ? 'GPS fix' : (d.gps_enabled ? 'Searching for fix' : 'GPS off');
+        }
+        const link = document.getElementById('gpsMapsLink');
+        if (link) {
+            link.href = fix && d.maps_url ? d.maps_url : '#';
+            if (fix) link.removeAttribute('aria-disabled'); else link.setAttribute('aria-disabled', 'true');
+        }
+        setPosition(fix ? Number(d.latitude) : null, fix ? Number(d.longitude) : null);
     });
 
-    const refreshBtn = document.getElementById('refreshSensorData');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', async function() {
-            const pollUrl = document.body.dataset.sensorPollUrl;
-            if (!pollUrl) return;
-            refreshBtn.disabled = true;
-            try {
-                const response = await fetch(pollUrl, { cache: 'no-store' });
-                if (response.ok) {
-                    document.dispatchEvent(new CustomEvent('sensor-data-update', {
-                        detail: await response.json()
-                    }));
-                }
-            } catch (error) {
-                console.error('Failed to refresh sensor data', error);
-            } finally {
-                refreshBtn.disabled = false;
-            }
+    const btn = document.getElementById('checkNow');
+    if (btn) {
+        btn.addEventListener('click', async function () {
+            btn.disabled = true;
+            const label = btn.innerHTML;
+            btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Checking…';
+            await window.ShellSafeLive.refresh();
+            btn.innerHTML = label;
+            btn.disabled = false;
         });
     }
-});
+})();
 </script>
 {% endblock %}

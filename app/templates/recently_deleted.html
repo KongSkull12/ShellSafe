@@ -1,54 +1,46 @@
 {% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Notifications</p>
-            <h1>Recently deleted alerts</h1>
-        </div>
-        <a href="{{ url_for('main.alerts') }}" class="ss-btn-ghost"><i class="bi bi-arrow-left"></i> Back to alerts</a>
-    </header>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert ss-flash alert-{{ 'danger' if category == 'error' else category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    {% if alerts %}
-        {% for alert in alerts %}
-        <div class="card alert-card mb-3">
-            <div class="card-body p-3 p-md-4">
-                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-                    <div>
-                        <h5 class="alert-title mb-1">{{ alert.alert_title }}</h5>
-                        <p class="alert-message mb-2">{{ alert.alert_message }}</p>
-                        <p class="mb-0 text-muted small">
-                            Created {{ alert.created_at.strftime('%b %d, %Y %I:%M %p') }}
-                            {% if alert.deleted_at %} · Deleted {{ alert.deleted_at.strftime('%b %d, %Y %I:%M %p') }}{% endif %}
-                        </p>
-                    </div>
-                    <div class="dash-toolbar">
-                        <form action="{{ url_for('main.restore_alert', alert_id=alert.alert_id) }}" method="POST">
-                            <button type="submit" class="ss-btn-soft"><i class="bi bi-arrow-counterclockwise"></i> Restore</button>
-                        </form>
-                        <form action="{{ url_for('main.delete_permanently', alert_id=alert.alert_id) }}" method="POST"
-                              data-confirm="Permanently delete this alert?"
-                              data-confirm-title="Permanent delete"
-                              data-confirm-action="Delete forever"
-                              data-confirm-danger="true">
-                            <button type="submit" class="ss-btn-danger"><i class="bi bi-x-circle"></i> Delete</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="ss-empty">No recently deleted alerts.</div>
-    {% endif %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Recently deleted alerts</h1>
+        <p>Restore an alert to the active list, or delete it for good.</p>
+    </div>
+    <div class="actions">
+        <a href="{{ url_for('main.alerts') }}" class="btn btn-quiet"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back to alerts</a>
+    </div>
 </div>
+
+{{ flashes() }}
+
+{% if alerts %}
+<div class="alert-list">
+    {% for alert in alerts %}
+    <article class="alert-item is-read" data-level="info">
+        <span class="alert-icon" aria-hidden="true"><i class="bi bi-archive"></i></span>
+        <div class="alert-body">
+            <h3 class="alert-title">{{ alert.alert_title }}</h3>
+            <p class="alert-msg">{{ alert.alert_message }}</p>
+            <p class="alert-meta">
+                <span>Raised {{ alert.created_at.strftime('%b %d, %Y · %I:%M %p') }}</span>
+                {% if alert.deleted_at %}<span>Deleted {{ alert.deleted_at.strftime('%b %d, %Y · %I:%M %p') }}</span>{% endif %}
+            </p>
+        </div>
+        <div class="alert-actions">
+            <form action="{{ url_for('main.restore_alert', alert_id=alert.alert_id) }}" method="POST">
+                <button type="submit" class="btn btn-quiet btn-sm"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+            </form>
+            <form action="{{ url_for('main.delete_permanently', alert_id=alert.alert_id) }}" method="POST"
+                  data-confirm="This alert will be removed permanently. This can't be undone."
+                  data-confirm-title="Delete forever?" data-confirm-action="Delete forever" data-confirm-danger="true">
+                <button type="submit" class="btn btn-ghost btn-icon" aria-label="Delete forever" title="Delete forever"><i class="bi bi-x-lg"></i></button>
+            </form>
+        </div>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty"><i class="bi bi-archive" aria-hidden="true"></i><strong>Nothing here</strong>Deleted alerts are kept here until you remove them for good.</div>
+{% endif %}
 {% endblock %}

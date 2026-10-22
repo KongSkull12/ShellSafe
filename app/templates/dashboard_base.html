@@ -1,188 +1,103 @@
+{% from "_ui.html" import live_status with context %}
+{% set L = live if live is defined and live else shell_live %}
+{% set is_admin = current_user.role == 'admin' %}
+{% set home = 'main.admin_dashboard' if is_admin else 'main.authority_dashboard' %}
+{% set alerts_ep = 'main.alerts' if is_admin else 'main.authority_alerts' %}
+{% macro nav_links() %}
+<ul class="nav">
+    <li><a href="{{ url_for(home) }}" {% if request.endpoint == home %}aria-current="page"{% endif %}><i class="bi bi-grid" aria-hidden="true"></i><span>Overview</span></a></li>
+    <li><a href="{{ url_for(alerts_ep) }}" {% if request.endpoint in (alerts_ep, 'main.recently_deleted') %}aria-current="page"{% endif %}><i class="bi bi-bell" aria-hidden="true"></i><span>Alerts</span>{% if unread_alert_count|int %}<span class="nav-count" aria-label="{{ unread_alert_count }} unread">{{ unread_alert_count }}</span>{% endif %}</a></li>
+    {% if is_admin %}
+    <li><a href="{{ url_for('main.data_history') }}" {% if request.endpoint == 'main.data_history' %}aria-current="page"{% endif %}><i class="bi bi-graph-up" aria-hidden="true"></i><span>Data history</span></a></li>
+    <li><a href="{{ url_for('main.devices') }}" {% if request.endpoint == 'main.devices' %}aria-current="page"{% endif %}><i class="bi bi-cpu" aria-hidden="true"></i><span>Device</span></a></li>
+    <li><a href="{{ url_for('main.reports') }}" {% if request.endpoint in ('main.reports', 'main.deleted_reports_view') %}aria-current="page"{% endif %}><i class="bi bi-file-earmark-text" aria-hidden="true"></i><span>Reports</span></a></li>
+    <li class="nav-label">Settings</li>
+    <li><a href="{{ url_for('main.sms_settings') }}" {% if request.endpoint == 'main.sms_settings' %}aria-current="page"{% endif %}><i class="bi bi-chat-left-text" aria-hidden="true"></i><span>SMS recipients</span></a></li>
+    <li><a href="{{ url_for('main.threshold_settings') }}" {% if request.endpoint == 'main.threshold_settings' %}aria-current="page"{% endif %}><i class="bi bi-sliders" aria-hidden="true"></i><span>Thresholds</span></a></li>
+    {% endif %}
+</ul>
+{% endmacro %}
+{% macro account() %}
+<div class="sidebar-foot">
+    <div class="account">
+        <span class="avatar" aria-hidden="true">{{ (current_user.email or '?')[0]|upper }}</span>
+        <span class="account-text">
+            <span class="account-name" title="{{ current_user.email }}">{{ current_user.email }}</span>
+            <span class="account-role">{{ 'Administrator' if is_admin else 'Authority' }}</span>
+        </span>
+    </div>
+    <a class="signout" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-left" aria-hidden="true"></i>Sign out</a>
+</div>
+{% endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}ShellSafe Dashboard{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff">
+    <title>{% if title %}{{ title }} · {% endif %}ShellSafe</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/logo.png') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,650&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.5/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dashboard.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v=console1">
     {% block styles %}{% endblock %}
 </head>
 <body
-    data-sensor-stream-url="{{ url_for('main.api_sensor_stream') if current_user.is_authenticated else '' }}"
-    data-sensor-poll-url="{{ url_for('main.api_sensor_data') if current_user.is_authenticated else '' }}"
+    data-sensor-stream-url="{{ url_for('main.api_sensor_stream') }}"
+    data-sensor-poll-url="{{ url_for('main.api_sensor_data') }}"
 >
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe Logo" style="width: 150px; height: auto;">
-            </div>
-            <ul class="nav flex-column">
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.admin_dashboard' %}active{% endif %}" href="{{ url_for('main.admin_dashboard') }}">
-                        <i class="bi bi-grid-fill"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.alerts' %}active{% endif %}" href="{{ url_for('main.alerts') }}">
-                        <i class="bi bi-bell-fill"></i>
-                        <span>Alerts</span>
-                        {% if unread_alert_count|int %}
-                        <span class="badge bg-danger ms-auto">{{ unread_alert_count }}</span>
-                        {% endif %}
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.data_history' %}active{% endif %}" href="{{ url_for('main.data_history') }}">
-                        <i class="bi bi-clock-history"></i>
-                        <span>Data History</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.devices' %}active{% endif %}" href="{{ url_for('main.devices') }}">
-                        <i class="bi bi-hdd-stack-fill"></i>
-                        <span>Devices</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.reports' %}active{% endif %}" href="{{ url_for('main.reports') }}">
-                        <i class="bi bi-file-earmark-text"></i>
-                        <span>Reports</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.sms_settings' %}active{% endif %}" href="{{ url_for('main.sms_settings') }}">
-                        <i class="bi bi-phone-fill"></i>
-                        <span>SMS Settings</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.threshold_settings' %}active{% endif %}" href="{{ url_for('main.threshold_settings') }}">
-                        <i class="bi bi-sliders"></i>
-                        <span>Thresholds</span>
-                    </a>
-                </li>
-            </ul>
-            <div class="sidebar-footer">
-                <div class="user-card">
-                    <div class="avatar">
-                        <i class="bi bi-person-circle"></i>
-                    </div>
-                    <div class="user-info">
-                        <span class="user-name">Admin 1</span>
-                        <span class="user-role">System Administrator</span>
-                    </div>
-                </div>
-                <a href="{{ url_for('auth.logout') }}" class="logout-button">
-                    <i class="bi bi-box-arrow-left"></i>
-                    <span>Logout</span>
-                </a>
-            </div>
-        </nav>
+<a class="visually-hidden" href="#main">Skip to content</a>
+<div class="app">
+    <nav class="sidebar" aria-label="Main">
+        <a class="wordmark" href="{{ url_for(home) }}"><img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe"></a>
+        {{ nav_links() }}
+        {{ account() }}
+    </nav>
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <button
-                class="btn btn-outline-primary d-md-none mb-3"
-                type="button"
-                data-bs-toggle="offcanvas"
-                data-bs-target="#mobileSidebar"
-                aria-controls="mobileSidebar"
-            >
-                <i class="bi bi-list"></i> Menu
+    <div class="main">
+        <header class="topbar">
+            <button class="btn btn-ghost btn-icon menu-btn" type="button" data-open-drawer aria-label="Open menu" aria-controls="navDrawer">
+                <i class="bi bi-list" aria-hidden="true" style="font-size: 18px;"></i>
+                {% if unread_alert_count|int %}<span class="count" aria-hidden="true"></span>{% endif %}
             </button>
+            <a class="topbar-logo" href="{{ url_for(home) }}"><img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe"></a>
+            <span class="topbar-title">{{ 'Administrator' if is_admin else 'Authority' }} / <strong>{{ title or 'Overview' }}</strong></span>
+            <span class="spacer"></span>
+            {% if L %}{{ live_status(L) }}{% endif %}
+        </header>
+        <main id="main" class="page enter">
             {% block content %}{% endblock %}
         </main>
     </div>
+</div>
 
-    <div class="offcanvas offcanvas-start d-md-none" tabindex="-1" id="mobileSidebar" aria-labelledby="mobileSidebarLabel">
-        <div class="offcanvas-header">
-            <h5 class="offcanvas-title" id="mobileSidebarLabel">ShellSafe</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-        </div>
-        <div class="offcanvas-body p-0">
-            <ul class="nav flex-column p-3">
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.admin_dashboard' %}active{% endif %}" href="{{ url_for('main.admin_dashboard') }}">
-                        <i class="bi bi-grid-fill"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.alerts' %}active{% endif %}" href="{{ url_for('main.alerts') }}">
-                        <i class="bi bi-bell-fill"></i>
-                        <span>Alerts</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.data_history' %}active{% endif %}" href="{{ url_for('main.data_history') }}">
-                        <i class="bi bi-clock-history"></i>
-                        <span>Data History</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.devices' %}active{% endif %}" href="{{ url_for('main.devices') }}">
-                        <i class="bi bi-hdd-stack-fill"></i>
-                        <span>Devices</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.reports' %}active{% endif %}" href="{{ url_for('main.reports') }}">
-                        <i class="bi bi-file-earmark-text"></i>
-                        <span>Reports</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.sms_settings' %}active{% endif %}" href="{{ url_for('main.sms_settings') }}">
-                        <i class="bi bi-phone-fill"></i>
-                        <span>SMS Settings</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'main.threshold_settings' %}active{% endif %}" href="{{ url_for('main.threshold_settings') }}">
-                        <i class="bi bi-sliders"></i>
-                        <span>Thresholds</span>
-                    </a>
-                </li>
-                <li class="nav-item mt-3">
-                    <a class="nav-link text-danger" href="{{ url_for('auth.logout') }}">
-                        <i class="bi bi-box-arrow-left"></i>
-                        <span>Logout</span>
-                    </a>
-                </li>
-            </ul>
-        </div>
+<dialog class="drawer" id="navDrawer" aria-label="Menu">
+    <div class="drawer-head">
+        <a class="wordmark" href="{{ url_for(home) }}"><img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe"></a>
+        <button class="btn btn-ghost btn-icon" type="button" data-close-drawer aria-label="Close menu"><i class="bi bi-x-lg"></i></button>
     </div>
+    {{ nav_links() }}
+    {{ account() }}
+</dialog>
 
-    <div class="modal fade" id="ssConfirmModal" tabindex="-1" aria-labelledby="ssConfirmTitle" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="ssConfirmTitle">Confirm</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="ssConfirmBody">Are you sure?</div>
-                <div class="modal-footer">
-                    <button type="button" class="ss-btn-ghost" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="ss-btn-primary" id="ssConfirmBtn">Confirm</button>
-                </div>
-            </div>
+<dialog class="confirm" id="confirmDialog" aria-labelledby="confirmTitle">
+    <form method="dialog">
+        <div class="confirm-body">
+            <h2 id="confirmTitle">Are you sure?</h2>
+            <p id="confirmText"></p>
         </div>
-    </div>
+        <div class="confirm-foot">
+            <button class="btn btn-quiet" value="cancel">Cancel</button>
+            <button class="btn btn-primary" value="confirm" id="confirmOk">Confirm</button>
+        </div>
+    </form>
+</dialog>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    {% if current_user.is_authenticated %}
-    <script src="{{ url_for('static', filename='js/sensor-live.js') }}?v=gps2"></script>
-    {% endif %}
-    <script src="{{ url_for('static', filename='js/dash-ui.js') }}"></script>
-    {% block scripts %}{% endblock %}
+{% if L %}<script type="application/json" id="liveInitial">{{ L|tojson }}</script>{% endif %}
+<script src="{{ url_for('static', filename='js/ui.js') }}?v=console1"></script>
+<script src="{{ url_for('static', filename='js/live.js') }}?v=console1"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>
-

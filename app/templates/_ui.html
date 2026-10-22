@@ -1,0 +1,84 @@
+{# Shared building blocks for the logged-in app. #}
+
+{% macro state_text(s) -%}
+    {%- if s.state == 'live' -%}{{ s.level_label or 'Live' }}{%- else -%}{{ s.state_label }}{%- endif -%}
+{%- endmacro %}
+
+{% macro live_status(live) %}
+{% set st = live.link.state %}
+<span class="live" data-link-pill data-state="{{ st }}" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span data-link-label>{% if st == 'live' %}Live{% elif st == 'offline' %}Offline{% elif st == 'checking' %}Connecting{% else %}No data{% endif %}</span>
+    <span class="meta">· {{ live.link.device_id or 'SH-001' }} · <span data-last-seen>{% if st == 'live' %}updated just now{% elif live.link.last_update and live.link.last_update != 'unknown' %}last seen {{ live.link.last_update }}{% else %}never seen{% endif %}</span></span>
+</span>
+{% endmacro %}
+
+{% macro risk(r) %}
+{% set icons = {'normal': 'bi-check-lg', 'warning': 'bi-exclamation-lg', 'high': 'bi-exclamation-triangle'} %}
+<section class="risk" data-verdict data-level="{{ r.overall_level }}" aria-live="polite">
+    <span class="risk-icon" aria-hidden="true"><i class="bi {{ icons.get(r.overall_level, 'bi-dash-lg') }}" data-verdict-icon></i></span>
+    <div class="risk-text">
+        <p class="risk-title">Bloom risk: <span data-verdict-label>{{ r.overall_label }}</span></p>
+        <p class="risk-msg" data-verdict-msg>{{ r.message }}</p>
+    </div>
+    <div class="risk-score" data-verdict-score-wrap {% if r.overall_score is none %}hidden{% endif %}>
+        <strong data-verdict-score>{{ '%.0f'|format(r.overall_score) if r.overall_score is not none else '' }}</strong>
+        <span>score / 100</span>
+    </div>
+    <div class="risk-tags" data-verdict-tags>{% for p in r.triggered %}<span class="badge badge-{{ p.level }}">{{ p.name }} {{ p.display }}</span>{% endfor %}</div>
+</section>
+{% endmacro %}
+
+{% macro metrics(live) %}
+<section class="metrics" aria-label="Current readings">
+    {% for s in live.sensors %}
+    <div class="metric" data-plate="{{ s.key }}" data-state="{{ s.state }}" data-level="{{ s.level or '' }}">
+        <span class="metric-label">{{ s.label }}</span>
+        <span class="metric-value">
+            <span class="num t-digit-group" data-plate-num>{{ s.display if s.state == 'live' else '—' }}</span>
+            <span class="unit" data-plate-unit {% if s.state != 'live' or not s.display_unit %}hidden{% endif %}>{{ s.display_unit }}</span>
+        </span>
+        <span class="metric-foot">
+            <span class="state" data-plate-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ state_text(s) }}</span>
+            <span class="metric-last" data-plate-last>{% if s.last_display %}last {{ s.last_display }} {{ s.unit }}{% endif %}</span>
+        </span>
+    </div>
+    {% endfor %}
+</section>
+{% endmacro %}
+
+{% macro chart_panel(s) %}
+<section class="panel chart-panel" data-chart="{{ s.key }}" aria-labelledby="chart-{{ s.key }}">
+    <div class="chart-head">
+        <div class="chart-title">
+            <h2 id="chart-{{ s.key }}">{{ s.label }}{% if s.unit %} <span>{{ s.unit }}</span>{% endif %}</h2>
+            <p data-trend-caption>Readings since the server started</p>
+        </div>
+        <div class="chart-now" data-chart-now="{{ s.key }}" data-state="{{ s.state }}">
+            <span class="val"><span data-chart-val>{{ s.display if s.state == 'live' else '—' }}</span><span class="unit" data-chart-unit {% if s.state != 'live' or not s.display_unit %}hidden{% endif %}>{{ s.display_unit }}</span></span>
+            <span class="state" data-chart-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ state_text(s) }}</span>
+        </div>
+    </div>
+    <div class="chart-box">
+        <canvas role="img" aria-label="{{ s.label }} trend"></canvas>
+        <div class="chart-empty" data-trend-empty hidden></div>
+    </div>
+</section>
+{% endmacro %}
+
+{% macro flashes() %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-stack">
+    {% for category, message in messages %}
+    {% set cat = 'error' if category in ('error', 'danger') else (category if category in ('success', 'warning', 'info') else 'info') %}
+    <div class="flash flash-{{ cat }}" role="{{ 'alert' if cat == 'error' else 'status' }}">
+        <i class="bi {{ {'success': 'bi-check-circle-fill', 'warning': 'bi-exclamation-triangle-fill', 'error': 'bi-x-circle-fill'}.get(cat, 'bi-info-circle-fill') }}" aria-hidden="true"></i>
+        <p>{{ message }}</p>
+        <button type="button" class="btn btn-ghost btn-icon" data-dismiss-flash aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+{% endmacro %}

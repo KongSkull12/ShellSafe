@@ -1,0 +1,44 @@
+{% from "_ui.html" import risk, metrics, chart_panel, flashes with context %}
+{# Expects: live, history, alerts, alerts_endpoint #}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Overview</h1>
+        <p class="status-line">
+            <span>Node <strong>{{ live.link.device_id or 'SH-001' }}</strong></span>
+            <span><strong data-live-count>{{ live.link.live_count }}</strong> of 5 probes reading</span>
+        </p>
+    </div>
+</div>
+
+{{ flashes() }}
+
+{{ risk(live.risk_assessment) }}
+
+{{ metrics(live) }}
+
+<div class="chart-grid" id="trends">
+    {% for s in live.sensors %}{{ chart_panel(s) }}{% endfor %}
+
+    <section class="panel" aria-labelledby="recentAlertsTitle">
+        <div class="panel-head">
+            <h2 id="recentAlertsTitle">Recent alerts</h2>
+            <a class="btn btn-ghost btn-sm" href="{{ url_for(alerts_endpoint) }}">View all <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+        </div>
+        {% if alerts %}
+        <div class="alert-list">
+            {% for alert in alerts %}
+            {% set lvl = 'high' if alert.alert_level in ('Critical', 'High') else ('warning' if alert.alert_level in ('Moderate', 'Warning') else ('ok' if alert.alert_level == 'Low' else 'info')) %}
+            <div class="alert-item is-compact {% if alert.status != 'Unread' %}is-read{% endif %}" data-level="{{ lvl }}">
+                <span class="alert-icon" aria-hidden="true"><i class="bi {{ 'bi-exclamation-triangle' if lvl in ('high', 'warning') else 'bi-info-lg' }}"></i></span>
+                <div class="alert-body">
+                    <span class="alert-title">{% if alert.status == 'Unread' %}<span class="unread-dot" aria-label="Unread"></span>{% endif %}{{ alert.alert_title }}</span>
+                    <span class="alert-meta">{{ alert.created_at.strftime('%b %d, %I:%M %p') }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty"><i class="bi bi-bell-slash" aria-hidden="true"></i><strong>No alerts</strong>High-risk readings will show up here.</div>
+        {% endif %}
+    </section>
+</div>

@@ -4,6 +4,7 @@
 .env.*.local
 serviceAccountKey.json
 firebase-config.json
+secrets.h
 
 # Node
 node_modules/
@@ -16,6 +17,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/

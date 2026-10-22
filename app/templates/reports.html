@@ -1,72 +1,93 @@
 {% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Exports</p>
-            <h1>Monitoring reports</h1>
-        </div>
-        <div class="dash-toolbar">
-            <a href="{{ url_for('main.reports') }}" class="ss-btn-primary">Active</a>
-            <a href="{{ url_for('main.deleted_reports_view') }}" class="ss-btn-ghost">Recently deleted</a>
-        </div>
-    </header>
-
-    <section class="ss-panel mb-3">
-        <div class="d-flex gap-2 flex-wrap">
-            <input type="text" class="form-control" style="max-width: 260px;" placeholder="Search reports…">
-            <input type="date" class="form-control" style="max-width: 180px;">
-            <select class="form-select" style="max-width: 200px;">
-                <option selected>All types</option>
-                <option>Daily</option>
-                <option>Weekly</option>
-                <option>Monthly</option>
-            </select>
-        </div>
-    </section>
-
-    <div class="ss-table-wrap">
-        <div class="table-responsive">
-            <table class="table align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th>Report</th>
-                        <th>Type</th>
-                        <th>Generated</th>
-                        <th>Size</th>
-                        <th>By</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for report in reports %}
-                    {% set rid = report.id or report.report_id %}
-                    <tr>
-                        <td class="fw-semibold">{{ report.report_name }}</td>
-                        <td><span class="ss-chip">{{ report.report_type }}</span></td>
-                        <td>{{ report.generated_date.strftime('%b %d, %Y %I:%M %p') if report.generated_date else '—' }}</td>
-                        <td>{{ report.file_size or '—' }}</td>
-                        <td>{{ report.generated_by or '—' }}</td>
-                        <td>
-                            <div class="dash-toolbar">
-                                <form action="{{ url_for('main.delete_report', report_id=rid) }}" method="POST"
-                                      data-confirm="Move this report to Recently Deleted?"
-                                      data-confirm-title="Delete report"
-                                      data-confirm-action="Delete">
-                                    <button type="submit" class="ss-btn-ghost btn-sm" title="Delete"><i class="bi bi-trash"></i></button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="6" class="text-center text-muted py-5">No active reports yet.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Monitoring reports</h1>
+        <p>Reports saved to Firestore. Deleted reports can be restored from the trash.</p>
+    </div>
+    <div class="actions">
+        <a href="{{ url_for('main.deleted_reports_view') }}" class="btn btn-quiet"><i class="bi bi-trash3" aria-hidden="true"></i> Deleted reports</a>
     </div>
 </div>
+
+{{ flashes() }}
+
+<section class="panel">
+    {% if reports %}
+    <div class="filters" style="margin-bottom: 16px;">
+        <div class="field">
+            <label for="reportSearch">Search</label>
+            <input class="input" type="search" id="reportSearch" placeholder="Report name or author" autocomplete="off">
+        </div>
+        <div class="field">
+            <label for="reportType">Type</label>
+            <select class="select" id="reportType">
+                <option value="">All types</option>
+                {% for t in reports|map(attribute='report_type')|reject('none')|unique|sort %}
+                <option value="{{ t|lower }}">{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr><th>Report</th><th>Type</th><th>Generated</th><th>Size</th><th>By</th><th><span class="visually-hidden">Actions</span></th></tr>
+            </thead>
+            <tbody id="reportRows">
+                {% for report in reports %}
+                {% set rid = report.id or report.report_id %}
+                <tr data-search="{{ (report.report_name ~ ' ' ~ (report.generated_by or ''))|lower }}" data-type="{{ (report.report_type or '')|lower }}">
+                    <td class="strong">{{ report.report_name }}</td>
+                    <td><span class="tag">{{ report.report_type }}</span></td>
+                    <td class="muted">{{ report.generated_date.strftime('%b %d, %Y · %I:%M %p') if report.generated_date else '—' }}</td>
+                    <td class="muted">{{ report.file_size or '—' }}</td>
+                    <td class="muted">{{ report.generated_by or '—' }}</td>
+                    <td class="num">
+                        <form action="{{ url_for('main.delete_report', report_id=rid) }}" method="POST"
+                              data-confirm="It moves to Deleted reports, where you can restore it."
+                              data-confirm-title="Delete this report?" data-confirm-action="Delete">
+                            <button type="submit" class="btn btn-ghost btn-icon" aria-label="Delete {{ report.report_name }}"><i class="bi bi-trash3"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    <div class="empty" id="reportsEmpty" {% if reports %}hidden{% endif %} style="margin-top: 8px;">
+        <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+        <strong>{% if reports %}No matching reports{% else %}No reports yet{% endif %}</strong>
+        {% if reports %}Try another name or type.{% else %}Saved monitoring reports will be listed here.{% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const search = document.getElementById('reportSearch');
+    const type = document.getElementById('reportType');
+    const rows = Array.from(document.querySelectorAll('#reportRows tr'));
+    const empty = document.getElementById('reportsEmpty');
+    if (!rows.length) return;
+    function filter() {
+        const q = search.value.trim().toLowerCase();
+        const t = type.value;
+        let shown = 0;
+        rows.forEach(function (row) {
+            const ok = (!q || row.dataset.search.includes(q)) && (!t || row.dataset.type === t);
+            row.hidden = !ok;
+            if (ok) shown += 1;
+        });
+        empty.hidden = shown > 0;
+    }
+    search.addEventListener('input', filter);
+    type.addEventListener('change', filter);
+})();
+</script>
 {% endblock %}

@@ -1,13 +1,20 @@
 """
 Firebase Realtime Database Service
 Reads live sensor data written by ESP32 T-Call A7670 (shellsafev2.ino).
+
+Link state model (what the UI shows):
+  live     - the device published recently; per-probe values are trusted
+  checking - first sighting after server start, no proof of freshness yet
+  offline  - the device stopped publishing; last values are history, not live
 """
 
+from collections import deque
 from datetime import datetime, timezone
 import os
 import re
+import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 from firebase_admin import db
 
@@ -22,14 +29,22 @@ SMS_CONFIG_PATH = '/sms_config'
 SMS_TEST_PATH = '/sms_test'
 MAX_SMS_PHONES = 4
 
-DEVICE_OFFLINE_TIMEOUT_SECONDS = int(os.environ.get('DEVICE_OFFLINE_TIMEOUT_SECONDS', '20'))
-UPTIME_OFFLINE_TIMEOUT_SECONDS = int(os.environ.get('UPTIME_OFFLINE_TIMEOUT_SECONDS', '20'))
+# Firmware publishes every ~5 s, but a PUT can stall behind modem/SMS work,
+# so allow a few missed publishes before calling the device offline.
+DEVICE_OFFLINE_TIMEOUT_SECONDS = int(os.environ.get('DEVICE_OFFLINE_TIMEOUT_SECONDS', '30'))
 
 # Short in-memory cache so SSE/poll do not hammer Firebase every tick.
 _latest_cache: Dict[str, object] = {'data': None, 'expires': 0.0}
 _LATEST_CACHE_TTL = float(os.environ.get('SENSOR_CACHE_TTL_SECONDS', '2.5'))
 # Track whether firmware uptime is still advancing; if it stalls, device is offline.
 _uptime_tracker: Dict[str, Dict[str, float]] = {}
+
+# Readings seen while the server runs. RTDB only holds the latest snapshot,
+# so this is the only history available without a firmware change.
+HISTORY_MAX_SAMPLES = int(os.environ.get('SENSOR_HISTORY_SAMPLES', '720'))
+_history: Deque[Dict] = deque(maxlen=HISTORY_MAX_SAMPLES)
+_history_lock = threading.Lock()
+_last_history_key: Dict[str, object] = {'key': None}
 
 # Uptime timestamps from firmware (millis()/1000) are well below Unix epoch seconds.
 UPTIME_TIMESTAMP_MAX = 1_000_000_000
@@ -108,60 +123,104 @@ def _parse_timestamp(timestamp) -> Optional[datetime]:
     return None
 
 
-def _is_data_stale(timestamp, has_sensor_payload: bool) -> bool:
-    """
-    Offline if wall-clock last reading is too old.
-    Firmware millis()/1000 uptime cannot be compared to Unix epoch — treat a
-    present payload as fresh (device is actively publishing).
-    """
-    if _is_uptime_timestamp(timestamp):
-        return not has_sensor_payload
-
+def _wall_clock_epoch(timestamp) -> Optional[float]:
     dt = _parse_timestamp(timestamp)
     if not dt:
-        # No usable wall clock: online if any sensor field is present in payload.
-        return not has_sensor_payload
-
-    age_seconds = (datetime.utcnow() - dt).total_seconds()
-    return age_seconds > DEVICE_OFFLINE_TIMEOUT_SECONDS
+        return None
+    return dt.replace(tzinfo=timezone.utc).timestamp()
 
 
-def _is_uptime_stale(device_id: str, uptime_value, has_sensor_payload: bool) -> bool:
+def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[str, Optional[float]]:
     """
-    Determine staleness for uptime-based timestamps (millis()/1000).
-    If uptime no longer increases for a while, assume the device is offline and
-    only old RTDB data remains.
+    Decide whether the device is publishing right now.
+    Returns (link_state, last_seen_epoch).
+
+    Priority:
+      1. server_ts - Firebase server timestamp written with each PUT (exact).
+      2. uptime_seconds - advancing uptime proves the device is alive; a frozen
+         value means only an old snapshot is left in RTDB.
+      3. wall-clock timestamp (GPS UTC) when nothing better exists.
     """
-    if not has_sensor_payload:
-        return True
-
-    try:
-        uptime = float(uptime_value)
-    except (TypeError, ValueError):
-        return True
-
     now = time.time()
-    state = _uptime_tracker.get(device_id)
-    if not state:
-        _uptime_tracker[device_id] = {
-            'last_uptime': uptime,
-            'last_progress_at': now,
-        }
-        return False
+    if not has_sensor_payload:
+        return 'offline', None
 
-    last_uptime = float(state.get('last_uptime', uptime))
-    last_progress_at = float(state.get('last_progress_at', now))
+    server_ts = raw.get('server_ts')
+    if isinstance(server_ts, (int, float)) and server_ts > 1e12:
+        seen = server_ts / 1000.0
+        age = now - seen
+        return ('live' if age <= DEVICE_OFFLINE_TIMEOUT_SECONDS else 'offline'), seen
 
-    # Uptime increases while device is publishing, or can reset after reboot.
-    progressed = uptime > (last_uptime + 0.001)
-    rebooted = uptime < (last_uptime - 5.0)
-    if progressed or rebooted:
-        state['last_uptime'] = uptime
-        state['last_progress_at'] = now
-        return False
+    wall_seen = _wall_clock_epoch(_reading_timestamp(raw))
 
-    state['last_uptime'] = uptime
-    return (now - last_progress_at) > UPTIME_OFFLINE_TIMEOUT_SECONDS
+    uptime_value = raw.get('uptime_seconds')
+    if uptime_value is None and _is_uptime_timestamp(raw.get('timestamp')):
+        uptime_value = raw.get('timestamp')
+
+    if uptime_value is not None:
+        try:
+            uptime = float(uptime_value)
+        except (TypeError, ValueError):
+            uptime = None
+
+        if uptime is not None:
+            state = _uptime_tracker.get(device_id)
+            if not state:
+                # First sighting: we cannot know yet whether uptime will advance.
+                _uptime_tracker[device_id] = {
+                    'last_uptime': uptime,
+                    'last_progress_at': None,
+                    'first_seen_at': now,
+                }
+                if wall_seen is not None:
+                    fresh = (now - wall_seen) <= DEVICE_OFFLINE_TIMEOUT_SECONDS
+                    return ('live' if fresh else 'offline'), wall_seen
+                return 'checking', None
+
+            last_uptime = float(state.get('last_uptime', uptime))
+            progressed = uptime > (last_uptime + 0.001)
+            rebooted = uptime < (last_uptime - 5.0)
+            state['last_uptime'] = uptime
+            if progressed or rebooted:
+                state['last_progress_at'] = now
+                return 'live', now
+
+            last_progress_at = state.get('last_progress_at')
+            if last_progress_at is not None:
+                if (now - last_progress_at) <= DEVICE_OFFLINE_TIMEOUT_SECONDS:
+                    return 'live', last_progress_at
+                return 'offline', last_progress_at
+
+            # Never seen it move. Give it one timeout window, then call it.
+            if (now - float(state.get('first_seen_at', now))) <= DEVICE_OFFLINE_TIMEOUT_SECONDS:
+                if wall_seen is not None and (now - wall_seen) > DEVICE_OFFLINE_TIMEOUT_SECONDS:
+                    return 'offline', wall_seen
+                return 'checking', wall_seen
+            return 'offline', wall_seen
+
+    if wall_seen is not None:
+        fresh = (now - wall_seen) <= DEVICE_OFFLINE_TIMEOUT_SECONDS
+        return ('live' if fresh else 'offline'), wall_seen
+
+    # A payload with no clock of any kind: trust it as live.
+    return 'live', None
+
+
+def humanize_age(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return 'unknown'
+    seconds = max(0, int(seconds))
+    if seconds < 10:
+        return 'just now'
+    if seconds < 60:
+        return f'{seconds} s ago'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes} min ago'
+    hours = minutes // 60
+    if hours < 48:
+        return f'{hours} hr ago'
+    return f'{hours // 24} days ago'
 
 
 def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
@@ -188,16 +247,9 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
     has_sensor_payload = sensor_keys_present or has_connected_reading
 
     reading_timestamp = _reading_timestamp(raw)
-    uptime_seconds = raw.get('uptime_seconds')
-    # uptime_seconds advances on every publish. A frozen value means the
-    # device stopped sending, even if the last GPS clock still looks recent.
-    if uptime_seconds is not None:
-        is_stale = _is_uptime_stale(device_id, uptime_seconds, has_sensor_payload)
-    elif _is_uptime_timestamp(reading_timestamp):
-        is_stale = _is_uptime_stale(device_id, reading_timestamp, has_sensor_payload)
-    else:
-        is_stale = _is_data_stale(reading_timestamp, has_sensor_payload)
-    is_online = bool(has_sensor_payload and not is_stale)
+    link_state, last_seen_epoch = _assess_link(device_id, raw, has_sensor_payload)
+    is_online = link_state == 'live'
+    last_seen_age = (time.time() - last_seen_epoch) if last_seen_epoch else None
 
     # Accept common firmware aliases (lat/lon, nested gps object).
     gps_obj = raw.get('gps') if isinstance(raw.get('gps'), dict) else {}
@@ -247,10 +299,21 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         'gps_accuracy_m': _to_float(raw.get('gps_accuracy_m')) if gps_fix else None,
         'satellites': int(raw.get('satellites') or 0) if gps_fix else 0,
         'maps_url': maps_url,
+        'sim_ready': raw.get('sim_ready'),
+        'gsm_network': raw.get('gsm_network'),
+        'gsm_signal': raw.get('gsm_signal'),
+        # Raw probe signal (V) and DS18B20 count, for wiring diagnostics.
+        'probe_voltage': raw.get('probe_voltage') if isinstance(raw.get('probe_voltage'), dict) else {},
+        'ds18b20_count': raw.get('ds18b20_count'),
+        # Per-probe calibration flags from firmware; missing means unknown (older firmware).
+        'calibrated': raw.get('calibrated') if isinstance(raw.get('calibrated'), dict) else {},
+        'uptime_seconds': raw.get('uptime_seconds'),
         'timestamp': reading_timestamp,
-        'last_update': _format_last_update(reading_timestamp, is_online),
+        'link_state': link_state,
+        'last_seen_epoch': last_seen_epoch,
+        'last_update': 'just now' if is_online else humanize_age(last_seen_age),
         'is_online': is_online,
-        'is_stale': is_stale,
+        'is_stale': not is_online,
         'offline_timeout_seconds': DEVICE_OFFLINE_TIMEOUT_SECONDS,
         'source': 'realtime_db',
     }
@@ -268,28 +331,6 @@ def _reading_timestamp(raw: Dict):
     if raw.get('uptime_seconds') is not None:
         return raw.get('uptime_seconds')
     return None
-
-
-def _format_last_update(timestamp, is_online: bool = True) -> str:
-    # Online payload with no wall clock (or only boot uptime) is a live reading.
-    if timestamp is None or _is_uptime_timestamp(timestamp):
-        return 'Just now' if is_online else 'Unknown'
-
-    dt = _parse_timestamp(timestamp)
-    if not dt:
-        return 'Just now' if is_online else 'Unknown'
-
-    try:
-        delta = datetime.utcnow() - dt
-        minutes = int(delta.total_seconds() // 60)
-        if minutes < 1:
-            return 'Just now'
-        if minutes < 60:
-            return f'{minutes} min{"s" if minutes != 1 else ""} ago'
-        hours = minutes // 60
-        return f'{hours} hr{"s" if hours != 1 else ""} ago'
-    except (OSError, OverflowError, ValueError):
-        return 'Live'
 
 
 def _sensor_is_active(value, sensor_type: str, connected: bool) -> bool:
@@ -332,9 +373,9 @@ def get_sensor_statuses(reading: Optional[Dict]) -> List[Dict]:
     if not reading.get('is_online', True):
         return [{
             'name': name,
-            'status': 'Disconnected',
+            'status': 'Offline',
             'status_class': 'secondary',
-            'reading': 'Disconnected',
+            'reading': 'Offline',
         } for _key, name, _field, _unit, _flag in SENSOR_SPECS]
 
     rows = []
@@ -343,11 +384,7 @@ def get_sensor_statuses(reading: Optional[Dict]) -> List[Dict]:
         connected = bool(reading.get(flag, value is not None))
         active = _sensor_is_active(value, key, connected)
 
-        if not connected:
-            status_label = 'Disconnected'
-            status_class = 'secondary'
-            display = 'Disconnected'
-        elif active:
+        if active:
             status_label = 'Active'
             status_class = 'success'
             display = _format_sensor_reading(key, value, unit)
@@ -364,6 +401,32 @@ def get_sensor_statuses(reading: Optional[Dict]) -> List[Dict]:
         })
 
     return rows
+
+
+def _record_history(reading: Dict) -> None:
+    """Append a live reading once per firmware publish."""
+    if not reading or not reading.get('is_online'):
+        return
+    key = (
+        reading.get('uptime_seconds'),
+        reading.get('timestamp'),
+        reading.get('temperature'), reading.get('ph'), reading.get('turbidity'),
+        reading.get('orp'), reading.get('ec'),
+    )
+    with _history_lock:
+        if key == _last_history_key['key']:
+            return
+        _last_history_key['key'] = key
+        sample = {'t': time.time()}
+        for spec_key, _name, field, _unit, flag in SENSOR_SPECS:
+            sample[spec_key] = reading.get(field) if reading.get(flag) else None
+        _history.append(sample)
+
+
+def get_live_history() -> List[Dict]:
+    """Readings captured since the server started, oldest first."""
+    with _history_lock:
+        return list(_history)
 
 
 def get_latest_sensor_data(use_cache: bool = True) -> Optional[Dict]:
@@ -404,6 +467,7 @@ def get_latest_sensor_data(use_cache: bool = True) -> Optional[Dict]:
         except Exception:
             pass
 
+    _record_history(result)
     _latest_cache['data'] = result
     _latest_cache['expires'] = now + _LATEST_CACHE_TTL
     return result
@@ -415,6 +479,34 @@ def get_sensor_readings(limit: int = 100) -> List[Dict]:
     if latest:
         return [latest]
     return []
+
+
+_sampler_started = False
+_sampler_lock = threading.Lock()
+
+
+def start_sensor_sampler(interval_seconds: float = 4.0, on_sample=None) -> None:
+    """
+    Poll RTDB in the background so link state, history and alerts stay
+    current even when no browser has the dashboard open.
+    """
+    global _sampler_started
+    with _sampler_lock:
+        if _sampler_started:
+            return
+        _sampler_started = True
+
+    def run():
+        while True:
+            try:
+                reading = get_latest_sensor_data(use_cache=False)
+                if on_sample:
+                    on_sample(reading)
+            except Exception:
+                pass
+            time.sleep(interval_seconds)
+
+    threading.Thread(target=run, name='shellsafe-sensor-sampler', daemon=True).start()
 
 
 def _normalize_phone(phone: str) -> Optional[str]:

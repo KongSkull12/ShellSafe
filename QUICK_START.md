@@ -51,15 +51,10 @@ Navigate to `http://localhost:5000` in your browser.
 
 ## Step 5: Test Login
 
-### Admin Account
-- **Email:** system.admin@gmail.com
-- **Password:** admin123
-- **Dashboard:** `/dashboard/admin` (full access)
-
-### Authority Account
-- **Email:** coastal.auth@gmail.com
-- **Password:** coast123
-- **Dashboard:** `/dashboard/authority` (limited access)
+Use the unique admin and authority credentials you supplied through
+`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AUTHORITY_EMAIL`, and `AUTHORITY_PASSWORD`
+when running `python -m flask create-users`. Do not use credentials copied from
+old setup guides; rotate any existing demo account passwords before deployment.
 
 ---
 

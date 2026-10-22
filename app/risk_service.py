@@ -27,6 +27,9 @@ LEVEL_LABELS = {
     'disconnected': 'Disconnected',
 }
 
+# Overall levels that mean "no verdict": risk is never stated from stale data.
+NO_VERDICT_LEVELS = frozenset({'offline', 'checking', 'nodata', 'idle'})
+
 OVERALL_MESSAGES = {
     'normal': 'All monitored parameters are within configured safe ranges.',
     'warning': 'One or more parameters are in the warning band. Monitor closely.',
@@ -103,24 +106,43 @@ def _assess_parameter(key: str, value: Optional[float], connected: bool, thresho
 
 def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
     if not sensor_data:
-        return _empty_assessment()
+        return _empty_assessment('nodata')
+
+    link_state = sensor_data.get('link_state') or (
+        'live' if sensor_data.get('is_online', True) else 'offline'
+    )
+    if link_state == 'checking':
+        return _empty_assessment('checking')
+    if link_state != 'live':
+        empty = _empty_assessment('offline')
+        last = sensor_data.get('last_update')
+        if last and last != 'unknown':
+            empty['message'] = f'Device offline. Last reading {last}. Risk is not assessed on old data.'
+        return empty
 
     thresholds = get_thresholds()
     parameters = []
+    calibrated = sensor_data.get('calibrated') or {}
     for key in SENSOR_ORDER:
         connected = _sensor_connected(sensor_data, key)
         value = _to_float(sensor_data.get(key)) if connected else None
-        parameters.append(_assess_parameter(key, value, connected, thresholds))
+        param = _assess_parameter(key, value, connected, thresholds)
+        if connected and value is not None and calibrated.get(key) is False:
+            param['level'] = 'uncalibrated'
+            param['label'] = 'Not calibrated'
+        parameters.append(param)
 
     active_parameters = [
         p for p in parameters
-        if p['level'] not in ('unknown', 'disconnected')
+        if p['level'] not in ('unknown', 'disconnected', 'uncalibrated')
     ]
 
     if not active_parameters:
-        empty = _empty_assessment()
+        empty = _empty_assessment('idle')
         empty['parameters'] = parameters
-        empty['message'] = 'Waiting for connected sensor data.'
+        if any(p['level'] == 'uncalibrated' for p in parameters):
+            empty['overall_label'] = 'Needs calibration'
+            empty['message'] = 'Probes are reading, but none is calibrated yet, so no risk verdict is given.'
         return empty
 
     distribution = {'normal': 0, 'warning': 0, 'high': 0}
@@ -150,6 +172,7 @@ def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
         'dial_bg': ui['dial_bg'],
         'parameters': parameters,
         'distribution': distribution,
+        'has_verdict': True,
         'triggered': [p for p in active_parameters if p['level'] != 'normal'],
         'disconnected': [p for p in parameters if p['level'] == 'disconnected'],
         'thresholds': thresholds,
@@ -186,13 +209,22 @@ def _ui_for_level(level: str) -> Dict:
     return mapping.get(level, mapping['normal'])
 
 
-def _empty_assessment() -> Dict:
+EMPTY_STATES = {
+    'nodata': ('No data', 'No reading from the device has reached Firebase yet.'),
+    'checking': ('Connecting', 'Checking whether the device is still publishing.'),
+    'offline': ('No live data', 'Device offline. Risk is not assessed on old data.'),
+    'idle': ('No probes reading', 'The device is online but every probe is disconnected.'),
+}
+
+
+def _empty_assessment(level: str = 'nodata') -> Dict:
     ui = _ui_for_level('normal')
+    label, message = EMPTY_STATES.get(level, EMPTY_STATES['nodata'])
     return {
-        'overall_level': 'normal',
-        'overall_label': 'Normal',
-        'overall_score': 0,
-        'message': 'Waiting for live sensor data.',
+        'overall_level': level,
+        'overall_label': label,
+        'overall_score': None,
+        'message': message,
         'card_class': ui['card_class'],
         'card_bg': ui['card_bg'],
         'dial_class': ui['dial_class'],
@@ -200,6 +232,7 @@ def _empty_assessment() -> Dict:
         'dial_bg': ui['dial_bg'],
         'parameters': [],
         'distribution': {'normal': 0, 'warning': 0, 'high': 0},
+        'has_verdict': False,
         'triggered': [],
         'disconnected': [],
         'thresholds': get_thresholds(),

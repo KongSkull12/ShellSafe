@@ -6,16 +6,14 @@ from app.models import Alert, Report
 from app.firestore_service import get_firestore_service
 from app.alert_helpers import normalize_alerts
 from app.realtime_db_service import (
-    get_latest_sensor_data,
-    get_sensor_statuses,
+    get_live_history,
     get_sms_phones,
     set_sms_phones,
     get_sms_test_status,
     request_sms_test,
     MAX_SMS_PHONES,
 )
-from app.risk_service import assess_bloom_risk
-from app.live_alert_sync import sync_live_alerts
+from app.sensor_view import build_live_payload, payload_fingerprint
 from app.threshold_service import (
     SENSOR_ORDER,
     get_default_thresholds,
@@ -38,6 +36,11 @@ def role_required(role):
         return decorated_function
     return decorator
 
+def _alerts_home():
+    if getattr(current_user, 'role', None) == 'authority':
+        return redirect(url_for('main.authority_alerts'))
+    return redirect(url_for('main.alerts'))
+
 @bp.route('/')
 @bp.route('/index')
 def index():
@@ -56,41 +59,22 @@ def about():
 @role_required('admin')
 def admin_dashboard():
     db = get_firestore_service()
-    
-    # Get dashboard data (sensor readings from Realtime Database when available)
-    sensor_readings = db.get_sensor_readings(limit=10)
-    latest_sensor = sensor_readings[0] if sensor_readings else None
-    risk_assessment = assess_bloom_risk(latest_sensor)
-    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:5])
-    devices = db.get_all_devices()
-    bloom_analysis = db.get_latest_bloom_risk_analysis()
-    
-    return render_template('admin_dashboard.html', title='Admin Dashboard',
-                         sensor_readings=sensor_readings,
-                         latest_sensor=latest_sensor,
-                         risk_assessment=risk_assessment,
-                         alerts=alerts,
-                         devices=devices,
-                         bloom_analysis=bloom_analysis)
+    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:4])
+    return render_template('admin_dashboard.html', title='Overview',
+                         live=build_live_payload(),
+                         history=get_live_history()[-60:],
+                         alerts=alerts)
 
 @bp.route('/dashboard/authority')
 @login_required
 @role_required('authority')
 def authority_dashboard():
     db = get_firestore_service()
-    
-    sensor_readings = db.get_sensor_readings(limit=10)
-    latest_sensor = sensor_readings[0] if sensor_readings else None
-    risk_assessment = assess_bloom_risk(latest_sensor)
-    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:5])
-    bloom_analysis = db.get_latest_bloom_risk_analysis()
-    
-    return render_template('authority_dashboard.html', title='Authority Dashboard',
-                         sensor_readings=sensor_readings,
-                         latest_sensor=latest_sensor,
-                         risk_assessment=risk_assessment,
-                         alerts=alerts,
-                         bloom_analysis=bloom_analysis)
+    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:4])
+    return render_template('authority_dashboard.html', title='Overview',
+                         live=build_live_payload(),
+                         history=get_live_history()[-60:],
+                         alerts=alerts)
 
 @bp.route('/dashboard/authority/alerts')
 @login_required
@@ -116,7 +100,7 @@ def mark_all_read():
         flash(f'Marked {count} alert(s) as read.', 'success')
     else:
         flash('No unread alerts to mark.', 'info')
-    return redirect(url_for('main.alerts'))
+    return _alerts_home()
 
 @bp.route('/alerts/clear_old', methods=['POST'])
 @login_required
@@ -128,7 +112,7 @@ def clear_old():
         flash(f'Cleared {count} read alert(s).', 'success')
     else:
         flash('No read alerts to clear. Mark alerts as read first.', 'info')
-    return redirect(url_for('main.alerts'))
+    return _alerts_home()
 
 @bp.route('/alerts/mark_read/<alert_id>', methods=['POST'])
 @login_required
@@ -139,11 +123,11 @@ def mark_read(alert_id):
     alert_doc = db.db.collection('alerts').document(alert_id).get()
     if not alert_doc.exists:
         flash('Alert not found.', 'error')
-        return redirect(url_for('main.alerts'))
+        return _alerts_home()
     
     db.update_alert(alert_id, {'is_acknowledged': True})
     flash('Alert marked as read.', 'success')
-    return redirect(url_for('main.alerts'))
+    return _alerts_home()
 
 @bp.route('/alerts/delete/<alert_id>', methods=['POST'])
 @login_required
@@ -154,11 +138,11 @@ def delete_alert(alert_id):
     alert_doc = db.db.collection('alerts').document(alert_id).get()
     if not alert_doc.exists:
         flash('Alert not found.', 'error')
-        return redirect(url_for('main.alerts'))
+        return _alerts_home()
     
     db.delete_alert(alert_id, permanent=False)
     flash('Alert moved to Recently Deleted.', 'success')
-    return redirect(url_for('main.alerts'))
+    return _alerts_home()
 
 @bp.route('/recently_deleted')
 @login_required
@@ -200,25 +184,19 @@ def delete_permanently(alert_id):
 @bp.route('/data_history')
 @login_required
 def data_history():
-    db = get_firestore_service()
-    sensor_readings = db.get_sensor_readings(limit=100)
-    return render_template('data_history.html', title='Data History', sensor_readings=sensor_readings)
+    return render_template('data_history.html', title='Data history',
+                           live=build_live_payload(),
+                           history=get_live_history())
 
 @bp.route('/devices')
 @login_required
 def devices():
-    db = get_firestore_service()
-    all_devices = db.get_all_devices()
-    sensor_data = get_latest_sensor_data()
-    sensor_statuses = get_sensor_statuses(sensor_data)
-    is_online = bool(sensor_data and sensor_data.get('is_online'))
+    live = build_live_payload()
     return render_template(
         'devices.html',
         title='Devices',
-        devices=all_devices,
-        sensor_data=sensor_data,
-        sensor_statuses=sensor_statuses,
-        is_online=is_online,
+        live=live,
+        sensor_data=live['sensor_data'],
     )
 
 
@@ -345,15 +323,7 @@ def threshold_settings():
 @bp.route('/api/sensor-data')
 @login_required
 def api_sensor_data():
-    # Poll path: no Firestore alert writes (avoids freeze under frequent refresh).
-    sensor_data = get_latest_sensor_data()
-    risk_assessment = assess_bloom_risk(sensor_data)
-    return jsonify({
-        'sensor_data': sensor_data,
-        'sensor_statuses': get_sensor_statuses(sensor_data),
-        'risk_assessment': risk_assessment,
-        'is_online': bool(sensor_data and sensor_data.get('is_online')),
-    })
+    return jsonify(build_live_payload())
 
 
 @bp.route('/api/sensor-stream')
@@ -362,45 +332,16 @@ def api_sensor_stream():
     """Push sensor updates when Firebase data changes (throttled)."""
     @stream_with_context
     def generate():
-        last_state_key = object()
+        last_key = object()
         keepalive_counter = 0
 
         while True:
-            sensor_data = get_latest_sensor_data()
-            # Fingerprint on readings so millis() uptime churn does not spam clients.
-            if sensor_data:
-                state_key = (
-                    sensor_data.get('temperature'),
-                    sensor_data.get('ph'),
-                    sensor_data.get('turbidity'),
-                    sensor_data.get('orp'),
-                    sensor_data.get('ec'),
-                    sensor_data.get('temperature_connected'),
-                    sensor_data.get('ph_connected'),
-                    sensor_data.get('turbidity_connected'),
-                    sensor_data.get('orp_connected'),
-                    sensor_data.get('ec_connected'),
-                    bool(sensor_data.get('is_online')),
-                    bool(sensor_data.get('gps_fix')),
-                    sensor_data.get('latitude'),
-                    sensor_data.get('longitude'),
-                    sensor_data.get('satellites'),
-                )
-            else:
-                state_key = None
-
-            if state_key != last_state_key:
-                last_state_key = state_key
-                risk_assessment = assess_bloom_risk(sensor_data)
-                sync_live_alerts(sensor_data, risk_assessment)
-                is_online = bool(sensor_data and sensor_data.get('is_online'))
-                payload = json.dumps({
-                    'sensor_data': sensor_data,
-                    'sensor_statuses': get_sensor_statuses(sensor_data),
-                    'risk_assessment': risk_assessment,
-                    'is_online': is_online,
-                })
-                yield f"data: {payload}\n\n"
+            # Alerts are raised by the background sampler, not per client.
+            payload = build_live_payload()
+            key = payload_fingerprint(payload)
+            if key != last_key:
+                last_key = key
+                yield f"data: {json.dumps(payload)}\n\n"
                 keepalive_counter = 0
             else:
                 keepalive_counter += 1

@@ -73,19 +73,12 @@ python run.py
 
 The application will start on `http://localhost:5000`
 
-## Default Accounts
+## Initial Accounts
 
-### Admin Account
-- **Email:** system.admin@gmail.com
-- **Password:** admin123
-- **Role:** admin
-- **Access:** Full system including devices, sensor data, reports, and alerts
-
-### Authority Account
-- **Email:** coastal.auth@gmail.com
-- **Password:** coast123
-- **Role:** authority
-- **Access:** Sensor data, reports, and alerts (no devices)
+Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AUTHORITY_EMAIL`, and
+`AUTHORITY_PASSWORD` to unique, strong credentials before running
+`python -m flask create-users`. The command creates accounts only; it does not
+reset passwords for existing accounts. Never commit passwords to source control.
 
 ## Firestore Collection Schema
 
@@ -361,8 +354,8 @@ create_bloom_risk_analysis(risk_score, risk_level, ...)
 - [ ] Default users created (`python -m flask create-users`)
 - [ ] Sample alerts created (`python -m flask create-alerts`)
 - [ ] Application started (`python run.py`)
-- [ ] Tested admin login (system.admin@gmail.com / admin123)
-- [ ] Tested authority login (coastal.auth@gmail.com / coast123)
+- [ ] Tested admin login with the credentials configured for the admin account
+- [ ] Tested authority login with the credentials configured for the authority account
 - [ ] Verified alert creation/retrieval
 - [ ] Verified report functionality
 - [ ] Tested soft delete and restore features

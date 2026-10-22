@@ -1,76 +1,39 @@
 {% extends "auth_base.html" %}
+{% from "_ui.html" import flashes with context %}
 
 {% block content %}
-<div class="ss-auth-shell">
-    <div class="ss-auth-brand">
-        <a href="{{ url_for('main.index') }}">
-            <img src="{{ url_for('static', filename='img/logo.png') }}" alt="">
-            ShellSafe
-        </a>
-        <p>Coastal water monitoring platform</p>
-    </div>
+<main class="auth">
+    <div class="auth-card enter">
+        <a class="auth-brand" href="{{ url_for('main.index') }}"><img src="{{ url_for('static', filename='img/NAVLOGO.png') }}" alt="ShellSafe"></a>
 
-    <div class="ss-auth-panel">
-        <h1>Sign in</h1>
-        <p class="lede">Use your admin or authority account.</p>
-
-        <form action="" method="post" novalidate>
+        <form class="auth-form" action="" method="post" novalidate>
             {{ form.hidden_tag() }}
+            <h1>Sign in</h1>
+            <p class="lede">Use your ShellSafe account. Administrators and authority staff sign in here.</p>
 
-            <div class="mb-3">
-                <label class="form-label" for="email">Email</label>
+            {{ flashes() }}
+
+            <div class="field">
+                <label for="email">Email</label>
+                {{ form.email(class="input", id="email", placeholder="you@example.com", autocomplete="username", autofocus=true, **({'aria-invalid': 'true'} if form.email.errors else {})) }}
+                {% for error in form.email.errors %}<span class="error">{{ error }}</span>{% endfor %}
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
                 <div class="input-group">
-                    <span class="input-group-text"><i class="fas fa-envelope"></i></span>
-                    {{ form.email(class="form-control", placeholder="you@example.com", id="email") }}
+                    {{ form.password(class="input", id="password", autocomplete="current-password", **({'aria-invalid': 'true'} if form.password.errors else {})) }}
+                    <button class="btn btn-ghost btn-icon" type="button" data-toggle-password aria-controls="password" aria-pressed="false" aria-label="Show password"><i class="bi bi-eye"></i></button>
                 </div>
-                {% for error in form.email.errors %}
-                    <div class="text-danger small mt-1">{{ error }}</div>
-                {% endfor %}
+                {% for error in form.password.errors %}<span class="error">{{ error }}</span>{% endfor %}
             </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="password">Password</label>
-                <div class="input-group">
-                    <span class="input-group-text"><i class="fas fa-lock"></i></span>
-                    {{ form.password(class="form-control", placeholder="Password", id="password") }}
-                    <button class="btn btn-outline-secondary" type="button" id="togglePassword" aria-label="Show password">
-                        <i class="fas fa-eye"></i>
-                    </button>
-                </div>
-                {% for error in form.password.errors %}
-                    <div class="text-danger small mt-1">{{ error }}</div>
-                {% endfor %}
-            </div>
+            <label class="check">{{ form.remember_me(id="remember") }} {{ form.remember_me.label.text }}</label>
 
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <div class="form-check">
-                    {{ form.remember_me(class="form-check-input", id="remember") }}
-                    {{ form.remember_me.label(class="form-check-label", for="remember") }}
-                </div>
-                <a href="#" class="forgot-password">Forgot password?</a>
-            </div>
-
-            <div class="mb-3">
-                <div class="form-label">Sign in as</div>
-                <div class="ss-role-grid role-selection">
-                    {% for subfield in form.role %}
-                        <div class="form-check">
-                            {{ subfield(class="form-check-input") }}
-                            {{ subfield.label(class="form-check-label") }}
-                        </div>
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div class="d-grid">
-                {{ form.submit(class="ss-auth-submit", value="Continue") }}
-            </div>
+            <button type="submit" class="btn btn-primary">Sign in</button>
         </form>
-    </div>
 
-    <div class="ss-auth-meta">
-        <a href="{{ url_for('main.index') }}">← Back to home</a>
-        <div class="mt-2">&copy; 2026 ShellSafe</div>
+        <p class="auth-foot"><a href="{{ url_for('main.index') }}">Back to the ShellSafe site</a></p>
     </div>
-</div>
+</main>
 {% endblock %}

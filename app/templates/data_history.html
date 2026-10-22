@@ -1,407 +1,156 @@
 {% extends "dashboard_base.html" %}
 
 {% block content %}
-<div class="dash-page">
-    <header class="dash-page-header">
-        <div>
-            <p class="dash-kicker">Analytics</p>
-            <h1>Data history</h1>
-        </div>
-        <div class="dash-toolbar">
-            <button class="ss-btn-primary" type="button"><i class="bi bi-download"></i> Export CSV</button>
-            <button class="ss-btn-ghost" type="button"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
-        </div>
-    </header>
-
-    <section class="ss-panel mb-3">
-        <div class="d-flex align-items-end gap-3 flex-wrap">
-            <div class="flex-grow-1" style="max-width:240px;">
-                <label for="startDate" class="form-label small fw-bold">Start</label>
-                <input type="datetime-local" class="form-control" id="startDate">
-            </div>
-            <div class="flex-grow-1" style="max-width:240px;">
-                <label for="endDate" class="form-label small fw-bold">End</label>
-                <input type="datetime-local" class="form-control" id="endDate">
-            </div>
-            <button class="ss-btn-primary" id="applyFilterBtn" type="button"><i class="bi bi-funnel"></i> Apply</button>
-            <button class="ss-btn-ghost" id="resetFilterBtn" type="button"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
-        </div>
-    </section>
-
-    <div class="history-summary-grid">
-        <div class="ss-stat"><span class="label">Average risk</span><p class="value" id="avgRiskScore">—</p></div>
-        <div class="ss-stat"><span class="label">Predicted risk</span><p class="value" id="predictedBloomRisk">—</p></div>
-        <div class="ss-stat"><span class="label">Trend</span><p class="value" id="trendDirection">—</p></div>
-        <div class="ss-stat"><span class="label">Highest risk</span><p class="value" id="highestRecordedRisk">—</p></div>
-        <div class="ss-stat"><span class="label">Latest point</span><p class="value" id="latestPrediction">—</p></div>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Data history</h1>
+        <p>Live readings recorded by this server since it started, up to the last {{ (720 * 5 / 60)|int }} minutes. The device keeps only its latest reading, so nothing older is stored yet.</p>
     </div>
-
-    <section class="ss-panel mb-3">
-        <h2>Historical trends</h2>
-        <div class="history-chart-grid mt-2">
-            <div class="history-chart-cell"><h3>Temperature (°C)</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="tempHistoryChart"></canvas></div></div>
-            <div class="history-chart-cell"><h3>pH</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="phHistoryChart"></canvas></div></div>
-            <div class="history-chart-cell"><h3>ORP (mV)</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="orpHistoryChart"></canvas></div></div>
-            <div class="history-chart-cell"><h3>EC (µS/cm)</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="ecHistoryChart"></canvas></div></div>
-            <div class="history-chart-cell"><h3>Turbidity (NTU)</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="turbidityHistoryChart"></canvas></div></div>
-            <div class="history-chart-cell"><h3>Risk score (%)</h3><div class="chart-wrapper" style="min-height:220px;"><canvas id="riskHistoryChart"></canvas></div></div>
+    <div class="actions">
+        <div class="tabs" role="group" aria-label="Time range">
+            <button type="button" data-range="900" aria-selected="false">15 min</button>
+            <button type="button" data-range="3600" aria-selected="false">1 hour</button>
+            <button type="button" data-range="0" aria-selected="true">All</button>
         </div>
-    </section>
-
-    <div class="ss-split mb-3">
-        <section class="ss-panel">
-            <h2>Risk mix</h2>
-            <div class="chart-wrapper mt-2" style="min-height:260px;"><canvas id="riskDistributionChart"></canvas></div>
-        </section>
-        <section class="ss-panel">
-            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
-                <h2 class="mb-0">Historical table</h2>
-                <input type="text" class="form-control form-control-sm" id="historySearchInput" placeholder="Search…" style="max-width:200px;">
-            </div>
-            <div class="table-responsive">
-                <table class="table ss-table mb-0">
-                    <thead>
-                        <tr>
-                            <th>Date & time</th>
-                            <th>Temp</th>
-                            <th>pH</th>
-                            <th>Turbidity</th>
-                            <th>ORP</th>
-                            <th>EC</th>
-                            <th>Risk</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyTableBody"></tbody>
-                </table>
-            </div>
-            <p class="small text-muted mt-2 mb-0" id="historyTableMeta">Showing 0 entries</p>
-        </section>
+        <button class="btn btn-primary" type="button" id="exportCsv"><i class="bi bi-download" aria-hidden="true"></i> Export CSV</button>
     </div>
 </div>
+
+<div class="chart-grid" id="historyCharts">
+    {% for s in live.sensors %}
+    <section class="panel chart-panel" data-history-chart="{{ s.key }}" aria-labelledby="h-{{ s.key }}">
+        <div class="chart-head">
+            <div class="chart-title"><h2 id="h-{{ s.key }}">{{ s.label }}{% if s.unit %} <span>{{ s.unit }}</span>{% endif %}</h2><p>Range in view</p></div>
+            <span class="badge badge-outline no-dot" data-history-stat>—</span>
+        </div>
+        <div class="chart-box is-small">
+            <canvas role="img" aria-label="{{ s.label }} history"></canvas>
+            <div class="chart-empty" data-trend-empty hidden></div>
+        </div>
+    </section>
+    {% endfor %}
+</div>
+
+<section class="panel" aria-labelledby="tableTitle">
+    <div class="panel-head">
+        <div>
+            <h2 id="tableTitle">Readings</h2>
+            <p id="historyMeta">—</p>
+        </div>
+    </div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr><th>Time</th>{% for s in live.sensors %}<th class="num">{{ s.label }}{% if s.unit %} ({{ s.unit }}){% endif %}</th>{% endfor %}</tr>
+            </thead>
+            <tbody id="historyRows"></tbody>
+        </table>
+    </div>
+    <div class="empty" id="historyEmpty" hidden>
+        <i class="bi bi-graph-up" aria-hidden="true"></i>
+        <strong>No readings recorded yet</strong>
+        <span id="historyEmptyText">Readings are recorded while the device is live.</span>
+    </div>
+</section>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/trend.js') }}?v=console1"></script>
 <script>
-document.addEventListener("DOMContentLoaded", function() {
-    const fromReadings = {{ sensor_readings|tojson }};
-    const readings = Array.isArray(fromReadings) ? [...fromReadings].reverse() : [];
+(function () {
+    const history = {{ history|tojson }};
+    const T = window.ShellSafeTrend;
+    T.seed(history, 720);
+    const KEYS = Object.keys(T.SENSORS);
+    let rangeSeconds = 0;
 
-    function parseDateFromReading(reading) {
-        const ts = reading?.timestamp;
-        if (typeof ts === 'number') {
-            const ms = ts > 1e12 ? ts : ts * 1000;
-            return new Date(ms);
-        }
-        if (typeof ts === 'string') {
-            const d = new Date(ts);
-            if (!Number.isNaN(d.getTime())) return d;
-        }
-        return null;
-    }
-
-    function formatDateLabel(reading, fallbackIndex) {
-        const d = parseDateFromReading(reading);
-        if (d) return d.toLocaleDateString();
-        return `Sample ${fallbackIndex + 1}`;
-    }
-
-    function formatDateTime(reading, fallbackIndex) {
-        const d = parseDateFromReading(reading);
-        if (!d) return `Sample ${fallbackIndex + 1}`;
-        return d.toLocaleString([], {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    }
-
-    function computeRisk(reading) {
-        let score = 0;
-        let counted = 0;
-        const t = Number(reading.temperature);
-        const ph = Number(reading.ph);
-        const turb = Number(reading.turbidity);
-        const orp = Number(reading.orp);
-        const ec = Number(reading.ec);
-
-        if (Number.isFinite(t)) {
-            counted += 1;
-            if (t > 35) score += 40;
-            else if (t > 32) score += 20;
-        }
-        if (Number.isFinite(ph)) {
-            counted += 1;
-            if (ph < 6.5 || ph > 8.5) score += 40;
-            else if (ph < 6.8 || ph > 8.2) score += 15;
-        }
-        if (Number.isFinite(turb)) {
-            counted += 1;
-            if (turb > 50) score += 35;
-            else if (turb > 40) score += 15;
-        }
-        if (Number.isFinite(orp)) {
-            counted += 1;
-            if (orp < 200) score += 35;
-            else if (orp < 250) score += 15;
-        }
-        if (Number.isFinite(ec)) {
-            counted += 1;
-            if (ec > 2000) score += 35;
-            else if (ec > 1800) score += 15;
-        }
-        if (!counted) return 0;
-        return Number(Math.min(100, score).toFixed(1));
-    }
-
-    function classifyRisk(score) {
-        if (score >= 70) return { label: 'High', className: 'bg-danger' };
-        if (score >= 40) return { label: 'Moderate', className: 'bg-warning text-dark' };
-        return { label: 'Low', className: 'bg-success' };
-    }
-
-    if (readings.length <= 1) {
-        const demoLabels = Array.from({ length: 30 }, (_, i) => `5/${i + 1}/2026`);
-        demoLabels.forEach((_, i) => {
-            readings.push({
-                timestamp: `2026-05-${String(i + 1).padStart(2, '0')}T12:00:00`,
-                temperature: 23 + Math.random() * 4,
-                ph: 7.2 + Math.random() * 0.6,
-                turbidity: 15 + Math.random() * 30,
-                orp: 250 + Math.random() * 100,
-                ec: 800 + Math.random() * 400
-            });
-        });
-    }
-
-    const normalizedRows = readings.map((reading) => ({
-        ...reading,
-        riskScore: computeRisk(reading),
-        _dateObj: parseDateFromReading(reading)
-    }));
-
-    const sharedOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        elements: { point: { radius: 1.5 } },
-        scales: {
-            x: {
-                grid: { color: '#f0f0f0' },
-                ticks: { maxRotation: 35, minRotation: 35, maxTicksLimit: 8 }
-            },
-            y: { grid: { color: '#f0f0f0' } }
-        }
-    };
-
-    function createSensorChart(canvasId, color, fillColor, yConfig = {}) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return null;
-        return new Chart(canvas.getContext('2d'), {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    data: [],
-                    borderColor: color,
-                    backgroundColor: fillColor,
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: true,
-                    spanGaps: true
-                }]
-            },
-            options: {
-                ...sharedOptions,
-                scales: {
-                    ...sharedOptions.scales,
-                    y: {
-                        ...sharedOptions.scales.y,
-                        ...yConfig
-                    }
-                }
-            }
-        });
-    }
-
-    const charts = {
-        temp: createSensorChart('tempHistoryChart', '#F39C12', 'rgba(243, 156, 18, 0.12)'),
-        ph: createSensorChart('phHistoryChart', '#2ECC71', 'rgba(46, 204, 113, 0.12)', { min: 0, max: 14 }),
-        orp: createSensorChart('orpHistoryChart', '#3498DB', 'rgba(52, 152, 219, 0.12)'),
-        ec: createSensorChart('ecHistoryChart', '#9B59B6', 'rgba(155, 89, 182, 0.12)'),
-        turbidity: createSensorChart('turbidityHistoryChart', '#1ABC9C', 'rgba(26, 188, 156, 0.12)'),
-        risk: createSensorChart('riskHistoryChart', '#E74C3C', 'rgba(231, 76, 60, 0.12)', { min: 0, max: 100 })
-    };
-
-    const riskDistCtx = document.getElementById('riskDistributionChart').getContext('2d');
-    const riskDistributionChart = new Chart(riskDistCtx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Low Risk (0)', 'Moderate Risk (0)', 'High Risk (0)'],
-            datasets: [{
-                data: [0, 0, 0],
-                backgroundColor: ['#2ECC71', '#F39C12', '#E74C3C'],
-                borderWidth: 2,
-                borderColor: '#ffffff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '70%',
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { usePointStyle: true, padding: 20 }
-                }
-            }
-        }
+    const charts = Array.from(document.querySelectorAll('[data-history-chart]')).map(function (root) {
+        return { key: root.dataset.historyChart, root: root, view: T.mount(root, { key: root.dataset.historyChart, span: 720, small: true }) };
     });
 
-    const startDateInput = document.getElementById('startDate');
-    const endDateInput = document.getElementById('endDate');
-    const applyFilterBtn = document.getElementById('applyFilterBtn');
-    const resetFilterBtn = document.getElementById('resetFilterBtn');
-    const searchInput = document.getElementById('historySearchInput');
+    function rows() {
+        const all = T.store.samples;
+        if (!rangeSeconds) return all;
+        const since = Date.now() / 1000 - rangeSeconds;
+        return all.filter(function (r) { return r.t >= since; });
+    }
 
-    function updateSummaryAndDistribution(activeRows) {
-        const scores = activeRows.map(row => row.riskScore);
-        const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-        const max = scores.length ? Math.max(...scores) : 0;
-        const first = scores.length ? scores[0] : 0;
-        const last = scores.length ? scores[scores.length - 1] : 0;
-        const trend = last >= first ? 'Rising' : 'Stable';
+    function fmt(key, v) {
+        return v == null ? '—' : Number(v).toFixed(T.SENSORS[key].decimals);
+    }
 
-        const avgRiskScore = document.getElementById('avgRiskScore');
-        const predictedBloomRisk = document.getElementById('predictedBloomRisk');
-        const trendDirection = document.getElementById('trendDirection');
-        const highestRecordedRisk = document.getElementById('highestRecordedRisk');
-        const latestPrediction = document.getElementById('latestPrediction');
+    function renderStats(list) {
+        charts.forEach(function (c) {
+            const vals = list.map(function (r) { return r[c.key]; }).filter(function (v) { return v != null; });
+            const stat = c.root.querySelector('[data-history-stat]');
+            if (!stat) return;
+            if (!vals.length) { stat.textContent = 'No readings'; return; }
+            const min = Math.min.apply(null, vals);
+            const max = Math.max.apply(null, vals);
+            stat.textContent = `${fmt(c.key, min)} – ${fmt(c.key, max)}`;
+        });
+    }
 
-        if (avgRiskScore) avgRiskScore.textContent = `${avg.toFixed(1)}%`;
-        if (highestRecordedRisk) highestRecordedRisk.textContent = `${max.toFixed(1)}%`;
-        if (predictedBloomRisk) predictedBloomRisk.textContent = classifyRisk(avg).label;
-        if (trendDirection) {
-            const icon = trend === 'Rising' ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
-            trendDirection.innerHTML = `<i class="bi ${icon}"></i> ${trend}`;
+    function renderTable() {
+        const list = rows();
+        const body = document.getElementById('historyRows');
+        const empty = document.getElementById('historyEmpty');
+        const meta = document.getElementById('historyMeta');
+        const recent = list.slice(-200).reverse();
+        body.innerHTML = recent.map(function (r) {
+            return `<tr><td class="muted">${T.timeLabel(r.t)}</td>${KEYS.map(function (k) { return `<td class="num">${fmt(k, r[k])}</td>`; }).join('')}</tr>`;
+        }).join('');
+        body.closest('table').hidden = !list.length;
+        empty.hidden = list.length > 0;
+        if (!list.length) {
+            const state = window.ShellSafeLive?.current?.link?.state;
+            document.getElementById('historyEmptyText').textContent = state === 'live'
+                ? 'The device is live; the first readings will appear in a few seconds.'
+                : 'Readings are recorded while the device is live. It is not reporting right now.';
         }
-        if (latestPrediction) {
-            latestPrediction.textContent = activeRows.length ? formatDateTime(activeRows[activeRows.length - 1], activeRows.length - 1) : 'No data';
-        }
+        meta.textContent = list.length
+            ? `${list.length} reading${list.length === 1 ? '' : 's'}${list.length > 200 ? ' · newest 200 shown, export for all' : ''}`
+            : 'No readings in this range';
+        renderStats(list);
+    }
 
-        const counts = { low: 0, moderate: 0, high: 0 };
-        activeRows.forEach(row => {
-            const label = classifyRisk(row.riskScore).label.toLowerCase();
-            if (label === 'moderate') counts.moderate += 1;
-            else if (label === 'high') counts.high += 1;
-            else counts.low += 1;
+    function renderCharts() {
+        const span = rangeSeconds ? Math.max(1, rows().length) : 720;
+        charts.forEach(function (c) { if (c.view) { c.view.setSpan(span); } });
+    }
+
+    document.querySelectorAll('[data-range]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            rangeSeconds = Number(btn.dataset.range);
+            document.querySelectorAll('[data-range]').forEach(function (b) { b.setAttribute('aria-selected', b === btn ? 'true' : 'false'); });
+            renderCharts();
+            renderTable();
         });
+    });
 
-        riskDistributionChart.data.datasets[0].data = [counts.low, counts.moderate, counts.high];
-        riskDistributionChart.data.labels = [
-            `Low Risk (${counts.low})`,
-            `Moderate Risk (${counts.moderate})`,
-            `High Risk (${counts.high})`
-        ];
-        riskDistributionChart.update();
-    }
+    document.addEventListener('shellsafe:live', function () {
+        if (rangeSeconds) renderCharts();
+        renderTable();
+    });
 
-    function updateTable(activeRows) {
-        const tableBody = document.getElementById('historyTableBody');
-        const tableMeta = document.getElementById('historyTableMeta');
-        if (!tableBody) return;
+    document.getElementById('exportCsv').addEventListener('click', function () {
+        const list = rows();
+        const header = ['time_utc'].concat(KEYS.map(function (k) { return T.SENSORS[k].unit ? `${k}_${T.SENSORS[k].unit.replace('µ', 'u').replace('/', '_')}` : k; }));
+        const lines = [header.join(',')].concat(list.map(function (r) {
+            return [new Date(r.t * 1000).toISOString()].concat(KEYS.map(function (k) { return r[k] == null ? '' : r[k]; })).join(',');
+        }));
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `shellsafe-readings-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    });
 
-        tableBody.innerHTML = '';
-        const showRows = [...activeRows].slice(-50).reverse();
-        showRows.forEach((row, idx) => {
-            const risk = classifyRisk(row.riskScore);
-            tableBody.insertAdjacentHTML('beforeend', `
-                <tr>
-                    <td class="ps-4">${formatDateTime(row, idx)}</td>
-                    <td>${row.temperature != null ? Number(row.temperature).toFixed(1) + ' °C' : 'Disconnected'}</td>
-                    <td>${row.ph != null ? Number(row.ph).toFixed(2) : 'Disconnected'}</td>
-                    <td>${row.turbidity != null ? Number(row.turbidity).toFixed(1) + ' NTU' : 'Disconnected'}</td>
-                    <td>${row.orp != null ? Number(row.orp).toFixed(1) + ' mV' : 'Disconnected'}</td>
-                    <td>${row.ec != null ? Number(row.ec).toFixed(1) + ' µS/cm' : 'Disconnected'}</td>
-                    <td class="pe-4"><span class="badge ${risk.className} rounded-pill px-3">${risk.label}</span></td>
-                </tr>
-            `);
-        });
-        if (!showRows.length) {
-            tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No records in selected range.</td></tr>';
-        }
-        if (tableMeta) tableMeta.textContent = `Showing ${showRows.length ? 1 : 0} to ${showRows.length} of ${activeRows.length} entries`;
-    }
-
-    function renderFiltered(activeRows) {
-        const chartLabels = activeRows.map((r, i) => formatDateLabel(r, i));
-        const series = {
-            temp: activeRows.map(r => r.temperature ?? null),
-            ph: activeRows.map(r => r.ph ?? null),
-            orp: activeRows.map(r => r.orp ?? null),
-            ec: activeRows.map(r => r.ec ?? null),
-            turbidity: activeRows.map(r => r.turbidity ?? null),
-            risk: activeRows.map(r => r.riskScore ?? 0)
-        };
-
-        Object.entries(charts).forEach(([key, chart]) => {
-            if (!chart) return;
-            chart.data.labels = chartLabels;
-            chart.data.datasets[0].data = series[key];
-            chart.update();
-        });
-
-        updateSummaryAndDistribution(activeRows);
-        updateTable(activeRows);
-    }
-
-    function getInputDateValue(date) {
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-    }
-
-    function applyFilters() {
-        const startVal = startDateInput?.value ? new Date(startDateInput.value) : null;
-        const endVal = endDateInput?.value ? new Date(endDateInput.value) : null;
-        const searchVal = (searchInput?.value || '').toLowerCase().trim();
-
-        const filtered = normalizedRows.filter(row => {
-            const d = row._dateObj;
-            if (startVal && d && d < startVal) return false;
-            if (endVal && d && d > endVal) return false;
-            if (!searchVal) return true;
-            const haystack = [
-                row.temperature, row.ph, row.turbidity, row.orp, row.ec,
-                formatDateTime(row, 0), classifyRisk(row.riskScore).label
-            ].join(' ').toLowerCase();
-            return haystack.includes(searchVal);
-        });
-
-        renderFiltered(filtered);
-    }
-
-    const validDates = normalizedRows.map(r => r._dateObj).filter(Boolean).sort((a, b) => a - b);
-    if (startDateInput && endDateInput && validDates.length) {
-        startDateInput.value = getInputDateValue(validDates[0]);
-        endDateInput.value = getInputDateValue(validDates[validDates.length - 1]);
-    } else if (startDateInput && endDateInput) {
-        endDateInput.value = "2026-05-31T12:00";
-        startDateInput.value = "2026-05-01T00:00";
-    }
-
-    if (applyFilterBtn) applyFilterBtn.addEventListener('click', applyFilters);
-    if (resetFilterBtn) {
-        resetFilterBtn.addEventListener('click', function() {
-            if (startDateInput) startDateInput.value = validDates.length ? getInputDateValue(validDates[0]) : "2026-05-01T00:00";
-            if (endDateInput) endDateInput.value = validDates.length ? getInputDateValue(validDates[validDates.length - 1]) : "2026-05-31T12:00";
-            if (searchInput) searchInput.value = '';
-            applyFilters();
-        });
-    }
-    if (searchInput) searchInput.addEventListener('input', applyFilters);
-
-    renderFiltered(normalizedRows);
-});
+    renderTable();
+})();
 </script>
 {% endblock %}

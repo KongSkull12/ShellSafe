@@ -146,18 +146,12 @@ SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 ## 🔐 Authentication & Authorization
 
-### Default Accounts
-```
-Admin Account:
-  Email: system.admin@gmail.com
-  Password: admin123
-  Role: admin
+### Initial Accounts
 
-Authority Account:
-  Email: coastal.auth@gmail.com
-  Password: coast123
-  Role: authority
-```
+Create the initial admin and authority users with unique credentials supplied
+through the `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AUTHORITY_EMAIL`, and
+`AUTHORITY_PASSWORD` environment variables before running
+`python -m flask create-users`. Never commit account passwords.
 
 ### Access Control
 - **Admin Dashboard:** Full access to all data
