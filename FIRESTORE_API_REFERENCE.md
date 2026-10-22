@@ -38,7 +38,7 @@ The service is a singleton - multiple calls return the same instance.
 ```python
 from app.models import User
 
-user = User.get_by_email('system.admin@gmail.com')
+user = User.get_by_email('admin@example.com')
 # Returns: User object or None
 ```
 

@@ -14,7 +14,7 @@ SHELLSAFE/
 ├── serviceAccountKey.json  ← Your Firebase key
 ├── firebase_config.py
 ├── config.py
-├── run.py
+├── app.py
 └── app/
 ```
 
@@ -30,7 +30,9 @@ pip install -r requirements.txt
 
 ## Step 3: Initialize Database with Default Data
 
-```bash
+```powershell
+$env:FLASK_APP = "index.py"
+
 # Create default users (admin + authority)
 python -m flask create-users
 
@@ -44,7 +46,7 @@ python -m flask init-db
 ## Step 4: Run the Application
 
 ```bash
-python run.py
+python app.py
 ```
 
 Navigate to `http://localhost:5000` in your browser.
@@ -60,7 +62,9 @@ old setup guides; rotate any existing demo account passwords before deployment.
 
 ## Common Commands
 
-```bash
+```powershell
+$env:FLASK_APP = "index.py"
+
 # View Firestore data in Firebase Console
 # https://console.firebase.google.com → Your Project → Firestore Database
 
@@ -74,7 +78,7 @@ python -m flask create-alerts
 python -m flask init-db
 
 # Run development server
-python run.py
+python app.py
 
 # Access Flask shell
 python -m flask shell
@@ -90,7 +94,7 @@ SHELLSAFE/
 ├── firebase_config.py              ✨ NEW - Firebase initialization
 ├── config.py                       ✏️ UPDATED - No SQLAlchemy
 ├── requirements.txt                ✏️ UPDATED - Firebase instead of SQLAlchemy
-├── run.py                          ✏️ UPDATED - Firestore commands
+├── app.py                          ✏️ UPDATED - Firestore commands
 ├── FIREBASE_MIGRATION_GUIDE.md     ✨ NEW - Complete migration guide
 ├── MIGRATION_SUMMARY.md            ✨ NEW - Changes summary
 ├── QUICK_START.md                  ✨ NEW - This file
@@ -130,7 +134,7 @@ SHELLSAFE/
 **Solution:** They will be auto-created when first document is added
 
 ### Issue: Login says "Invalid email or password" 
-**Solution:** Run `python -m flask create-users` to create default accounts
+**Solution:** Set the account environment variables and run `python -m flask create-users`
 
 ---
 

@@ -88,4 +88,7 @@ def create_app(config_class=None):
         except Exception:
             return {'shell_live': None}
 
+    from app.cli import register_cli_commands
+    register_cli_commands(app)
+
     return app

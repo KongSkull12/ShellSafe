@@ -11,7 +11,7 @@ IoT shellfish / aquaculture monitoring system: Flask web dashboard and Firebase 
    venv\Scripts\activate
    pip install -r requirements.txt
    ```
-3. Run the app: `python run.py`
+3. Run the app: `python app.py`
 
 See `QUICK_START.md` and `FIREBASE_MIGRATION_GUIDE.md` for more detail.
 

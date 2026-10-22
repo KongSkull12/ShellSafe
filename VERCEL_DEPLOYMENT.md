@@ -40,8 +40,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 1. Push the project to a GitHub repository without local secrets.
 2. In Vercel, choose **Add New → Project** and import that repository.
-3. Keep the project root at the repository root. Vercel detects `index.py`,
-   installs `requirements.txt`, and serves the Flask app.
+3. Keep the project root at the repository root. `pyproject.toml` directs Vercel
+   to `index.py`'s Flask app, and Vercel installs `requirements.txt`.
 4. Add the environment variables above and deploy.
 5. Visit the deployment URL and verify login, dashboards, Firestore reads, and
    live sensor data.
@@ -59,10 +59,12 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 ## Initial user accounts
 
 Create initial users from a trusted local environment with Firebase credentials
-configured. Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AUTHORITY_EMAIL`, and
-`AUTHORITY_PASSWORD` to unique, strong values before running:
+configured. Set `FLASK_APP` to `index.py`, and set `ADMIN_EMAIL`,
+`ADMIN_PASSWORD`, `AUTHORITY_EMAIL`, and `AUTHORITY_PASSWORD` to unique, strong
+values before running:
 
 ```powershell
+$env:FLASK_APP = "index.py"
 python -m flask create-users
 ```
 
