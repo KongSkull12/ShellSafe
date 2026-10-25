@@ -1,0 +1,7 @@
+# Copy to ml/data/observations.csv and add one row per field check.
+# start/end: Philippine time (YYYY-MM-DD HH:MM). Readings logged between them get the label.
+# label: bloom or no_bloom. Record the no_bloom checks too; the models need both.
+# source: how you know (visual check, BFAR shellfish bulletin, chlorophyll kit, lab result).
+start,end,label,source,notes
+2026-11-03 06:00,2026-11-03 18:00,no_bloom,visual check,clear water at the station
+2026-11-10 06:00,2026-11-12 18:00,bloom,BFAR shellfish bulletin,red discoloration reported near the station

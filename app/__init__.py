@@ -53,11 +53,12 @@ def create_app(config_class=None):
             return
         from app.realtime_db_service import start_sensor_sampler
         from app.risk_service import assess_bloom_risk
-        from app.live_alert_sync import sync_live_alerts
+        from app.live_alert_sync import sync_device_alerts, sync_live_alerts
 
         def on_sample(reading):
             if reading and reading.get('is_online'):
                 sync_live_alerts(reading, assess_bloom_risk(reading))
+                sync_device_alerts(reading)
 
         start_sensor_sampler(on_sample=on_sample)
 

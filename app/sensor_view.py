@@ -12,6 +12,7 @@ Per-probe state:
 
 from typing import Dict, List, Optional
 
+from app.ml_service import predict_bloom
 from app.realtime_db_service import get_latest_sensor_data, get_sensor_statuses
 from app.risk_service import assess_bloom_risk
 
@@ -98,6 +99,7 @@ def build_live_payload(reading: Optional[Dict] = None, fetch: bool = True) -> Di
         'sensor_data': reading,
         'sensor_statuses': get_sensor_statuses(reading),
         'risk_assessment': risk,
+        'ml_prediction': predict_bloom(reading),
         'is_online': link_state == 'live',
         'link': {
             'state': link_state,
@@ -120,6 +122,9 @@ def payload_fingerprint(payload: Dict) -> tuple:
         payload['link']['state'],
         tuple((s['state'], s['value'], s['level']) for s in payload['sensors']),
         payload['risk_assessment'].get('overall_level'),
+        payload['ml_prediction'].get('message'),
+        reading.get('battery_pct'),
+        reading.get('transport'),
         bool(reading.get('gps_fix')),
         reading.get('latitude'),
         reading.get('longitude'),

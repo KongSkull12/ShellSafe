@@ -5,7 +5,9 @@ from functools import wraps
 from app.models import Alert, Report
 from app.firestore_service import get_firestore_service
 from app.alert_helpers import normalize_alerts
+from app.ml_service import load_metrics
 from app.realtime_db_service import (
+    get_history,
     get_live_history,
     get_sms_phones,
     set_sms_phones,
@@ -186,7 +188,14 @@ def delete_permanently(alert_id):
 def data_history():
     return render_template('data_history.html', title='Data history',
                            live=build_live_payload(),
-                           history=get_live_history())
+                           history=get_history())
+
+
+@bp.route('/model')
+@login_required
+@role_required('admin')
+def ml_model():
+    return render_template('ml_model.html', title='Prediction model', metrics=load_metrics())
 
 @bp.route('/devices')
 @login_required

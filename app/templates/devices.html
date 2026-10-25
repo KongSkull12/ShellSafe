@@ -64,6 +64,27 @@
     </section>
 </div>
 
+{% set ok_count = d.get('publish_ok') %}
+{% set fail_count = d.get('publish_fail') %}
+<section class="panel" aria-labelledby="powerTitle">
+    <div class="panel-head">
+        <div>
+            <h2 id="powerTitle">Power and performance</h2>
+            <p>Battery is read from the modem's supply voltage; on USB with no battery it shows the charger's 4.2 V as 100%. Needs firmware v5.</p>
+        </div>
+        <span class="tag {{ 'tag-high' if d.get('battery_pct') is not none and d.get('battery_pct') < 20 else ('tag-ok' if d.get('battery_pct') is not none else '') }}" id="batteryChip">{% if d.get('battery_pct') is not none %}Battery {{ d.get('battery_pct')|int }}%{% else %}Battery unknown{% endif %}</span>
+    </div>
+    <dl class="kv" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); column-gap: 32px;">
+        <div><dt>Battery</dt><dd id="pwrBattery">{% if d.get('battery_pct') is not none %}{{ d.get('battery_pct')|int }}% · {{ '%.2f'|format(d.get('battery_v')) }} V{% else %}—{% endif %}</dd></div>
+        <div><dt>Data link</dt><dd id="pwrLink">{{ {'wifi': 'WiFi', 'cellular': 'Cellular (A7670 LTE)'}.get(d.get('transport'), '—') }}</dd></div>
+        <div><dt>WiFi signal</dt><dd id="pwrRssi">{{ '%d dBm'|format(d.get('wifi_rssi')) if d.get('wifi_rssi') is not none else '—' }}</dd></div>
+        <div><dt>Mobile data</dt><dd id="pwrCellular">{{ {True: 'Connected', False: 'Standby'}.get(d.get('cellular_data'), '—') }}</dd></div>
+        <div><dt>Publishes OK / failed</dt><dd id="pwrPublish">{% if ok_count is not none %}{{ ok_count|int }} / {{ fail_count|int }}{% if ok_count + fail_count > 0 %} ({{ '%.0f'|format(100 * ok_count / (ok_count + fail_count)) }}% OK){% endif %}{% else %}—{% endif %}</dd></div>
+        <div><dt>Last publish took</dt><dd id="pwrPublishMs">{{ '%d ms'|format(d.get('publish_ms')) if d.get('publish_ms') is not none else '—' }}</dd></div>
+        <div><dt>Free memory</dt><dd id="pwrHeap">{% if d.get('free_heap') is not none %}{{ (d.get('free_heap') / 1024)|int }} KB (lowest {{ (d.get('min_free_heap') / 1024)|int }} KB){% else %}—{% endif %}</dd></div>
+    </dl>
+</section>
+
 <section class="panel" aria-labelledby="gpsTitle">
     <div class="panel-head">
         <div>
@@ -141,6 +162,25 @@
         if (d.uptime_seconds != null) {
             const u = Number(d.uptime_seconds);
             set('uptimeText', `${Math.floor(u / 3600)} h ${Math.floor((u % 3600) / 60)} min`);
+        }
+        const hasBatt = d.battery_pct != null;
+        set('pwrBattery', hasBatt ? `${Math.round(d.battery_pct)}% · ${Number(d.battery_v).toFixed(2)} V` : '—');
+        const battChip = document.getElementById('batteryChip');
+        if (battChip) {
+            battChip.textContent = hasBatt ? `Battery ${Math.round(d.battery_pct)}%` : 'Battery unknown';
+            battChip.classList.toggle('tag-high', hasBatt && d.battery_pct < 20);
+            battChip.classList.toggle('tag-ok', hasBatt && d.battery_pct >= 20);
+        }
+        set('pwrLink', { wifi: 'WiFi', cellular: 'Cellular (A7670 LTE)' }[d.transport] || '—');
+        set('pwrRssi', d.wifi_rssi != null ? `${Math.round(d.wifi_rssi)} dBm` : '—');
+        set('pwrCellular', d.cellular_data == null ? '—' : (d.cellular_data ? 'Connected' : 'Standby'));
+        if (d.publish_ok != null) {
+            const total = d.publish_ok + d.publish_fail;
+            set('pwrPublish', `${d.publish_ok} / ${d.publish_fail}` + (total ? ` (${Math.round(100 * d.publish_ok / total)}% OK)` : ''));
+        }
+        set('pwrPublishMs', d.publish_ms != null ? `${Math.round(d.publish_ms)} ms` : '—');
+        if (d.free_heap != null) {
+            set('pwrHeap', `${Math.floor(d.free_heap / 1024)} KB (lowest ${Math.floor(d.min_free_heap / 1024)} KB)`);
         }
         const chip = document.getElementById('gpsStatusChip');
         if (chip) {

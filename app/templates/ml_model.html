@@ -1,0 +1,96 @@
+{% extends "dashboard_base.html" %}
+
+{% macro pct(v) %}{{ '%.1f'|format(v * 100) }}%{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Prediction model</h1>
+        <p>Decision Tree, Support Vector Machine and Random Forest trained on labeled probe readings and compared on held-out data. The best model by F1-Score makes the live prediction on the Overview.</p>
+    </div>
+</div>
+
+{% if not metrics %}
+<section class="panel">
+    <div class="empty">
+        <i class="bi bi-diagram-3" aria-hidden="true"></i>
+        <strong>No model trained yet</strong>
+        <span>Train one on your computer with <code>python ml/train.py</code>, then commit <code>app/ml_models/</code>. See <code>ml/README.md</code> for how to collect and label readings.</span>
+    </div>
+</section>
+{% else %}
+
+{% if metrics.demo %}
+<div class="flash flash-warning" role="status">
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <p><strong>Demo model.</strong> Its labels were copied from the alert thresholds to test the pipeline, so these scores are not real results. Retrain with field observations before reporting them.</p>
+</div>
+{% endif %}
+
+<div class="split">
+    <section class="panel" aria-labelledby="cmpTitle">
+        <div class="panel-head">
+            <div>
+                <h2 id="cmpTitle">Comparison on the test set</h2>
+                <p>{{ metrics.test_rows }} test readings, split by {{ metrics.split }}. Cross-validated F1 is on the training data.</p>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Model</th><th class="num">Accuracy</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1-Score</th><th class="num">CV F1</th></tr></thead>
+                <tbody>
+                    {% for m in metrics.models %}
+                    <tr>
+                        <td class="strong">{{ m.name }}{% if m.key == metrics.best %} <span class="badge badge-ok no-dot">Best</span>{% endif %}</td>
+                        <td class="num">{{ pct(m.test.accuracy) }}</td>
+                        <td class="num">{{ pct(m.test.precision) }}</td>
+                        <td class="num">{{ pct(m.test.recall) }}</td>
+                        <td class="num strong">{{ pct(m.test.f1) }}</td>
+                        <td class="num muted">{{ pct(m.cv_f1_mean) }} ± {{ '%.1f'|format(m.cv_f1_std * 100) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="panel-note">Precision: of the readings predicted as bloom, how many were. Recall: of the real bloom readings, how many were caught. F1 balances the two.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="dataTitle">
+        <div class="panel-head"><h2 id="dataTitle">Training data</h2></div>
+        <dl class="kv">
+            <div><dt>Source</dt><dd>{{ metrics.source }}</dd></div>
+            <div><dt>Labeled readings</dt><dd>{{ metrics.rows }}</dd></div>
+            <div><dt>Bloom / no bloom</dt><dd>{{ metrics.class_counts.bloom }} / {{ metrics.class_counts.no_bloom }}</dd></div>
+            <div><dt>Train / test</dt><dd>{{ metrics.train_rows }} / {{ metrics.test_rows }}</dd></div>
+            <div><dt>Inputs</dt><dd>{{ metrics.features|join(', ') }}</dd></div>
+            <div><dt>Trained</dt><dd>{{ metrics.trained_at[:16]|replace('T', ' ') }} UTC</dd></div>
+        </dl>
+    </section>
+</div>
+
+<section class="panel" aria-labelledby="cmTitle">
+    <div class="panel-head">
+        <div>
+            <h2 id="cmTitle">Confusion matrices</h2>
+            <p>Rows are what was observed, columns are what the model predicted.</p>
+        </div>
+    </div>
+    <div style="display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+        {% for m in metrics.models %}
+        {% set cm = m.confusion_matrix %}
+        <div>
+            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">{{ m.name }}</h3>
+            <table class="table" style="border: 1px solid var(--border);">
+                <thead><tr><th></th><th class="num">Pred. no bloom</th><th class="num">Pred. bloom</th></tr></thead>
+                <tbody>
+                    <tr><td class="muted">No bloom</td><td class="num strong">{{ cm[0][0] }}</td><td class="num">{{ cm[0][1] }}</td></tr>
+                    <tr><td class="muted">Bloom</td><td class="num">{{ cm[1][0] }}</td><td class="num strong">{{ cm[1][1] }}</td></tr>
+                </tbody>
+            </table>
+            <p class="panel-note">Settings: {% for k, v in m.best_params.items() %}{{ k }} {{ v if v is not none else 'none' }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% endblock %}

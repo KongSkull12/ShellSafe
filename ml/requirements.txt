@@ -1,0 +1,6 @@
+# Training only. The web app runs the exported model without these.
+scikit-learn>=1.3
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+firebase-admin==6.5.0

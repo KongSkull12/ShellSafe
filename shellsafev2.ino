@@ -7,13 +7,13 @@
 #include <EEPROM.h>
 #include <Preferences.h>
 #include <math.h>
-#include "secrets.h"
+#include "secrets.h"   // WiFi, Firebase token, alert phone; copy secrets.h.example
 
 // ============================================================
 // SHELLSAFE
 // ESP32-WROVER-E + LilyGO T-Call A7670 V1.0
 // Built-in A7670: GSM / SMS + GNSS / GPS
-// WiFi: Firebase RTDB
+// WiFi: Firebase RTDB (A7670 mobile data as backup)
 // Sensors: DS18B20, pH, Turbidity, ORP, EC
 // ============================================================
 
@@ -76,6 +76,54 @@ const char* firebaseHost = "shellsafe-ac058-default-rtdb.firebaseio.com";
 const char* firebasePath = "/device_data.json";
 
 // ============================================================
+// CELLULAR DATA (A7670 LTE backup)
+// WiFi is used whenever it is up. When WiFi drops, readings go to Firebase
+// over the A7670's mobile data instead, at a slower rate to save load.
+// APN: Smart/TNT "internet", Globe/TM "internet.globe.com.ph",
+// DITO "internet.dito.ph".
+// ============================================================
+const char* cellularApn = "internet";
+const unsigned long cellularPublishInterval = 30000UL;
+const unsigned long cellularAttachRetryMs = 60000UL;
+bool cellularDataReady = false;
+unsigned long lastCellularAttach = 0;
+unsigned long lastCellularPublish = 0;
+
+// ============================================================
+// READING LOG
+// One compact reading per minute is appended under /readings. This is the
+// stored history used by the Data history page and for training the
+// bloom prediction models (see ml/README.md).
+// ============================================================
+const char* firebaseHistoryPath = "/readings.json";
+const unsigned long historyInterval = 60000UL;
+unsigned long lastHistoryPush = 0;
+
+// ============================================================
+// BATTERY
+// The A7670 is powered straight from the LiPo, so AT+CBC reports the
+// battery voltage with no extra wiring. On USB with no battery it reads the
+// charger output (about 4.2 V, shown as 100%). If you wire a divider from
+// the battery to a free ADC1 pin (GPIO33 or GPIO36), set the pin here and
+// that reading is used instead.
+// ============================================================
+#define BATTERY_ADC_PIN        -1
+const float BATTERY_DIVIDER_RATIO = 2.0f;   // 100k / 100k divider
+const unsigned long batteryReadInterval = 30000UL;
+unsigned long lastBatteryRead = 0;
+float batteryVoltage = 0.0f;
+int batteryPercent = -1;
+const char* batterySource = "none";
+
+// ============================================================
+// PUBLISH STATS (shown on the Device page)
+// ============================================================
+unsigned long publishOk = 0;
+unsigned long publishFail = 0;
+unsigned long lastPublishDurationMs = 0;
+const char* lastTransport = "none";
+
+// ============================================================
 // SENSOR OBJECTS
 // ============================================================
 OneWire oneWire(ONE_WIRE_BUS);
@@ -83,6 +131,8 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress tempSensorAddress;
 bool tempSensorFound = false;
 int oneWireDeviceCount = 0;
+const int TEMP_DROP_READS = 3;
+int tempBadReads = 0;
 DFRobot_EC ec;
 
 // ============================================================
@@ -98,6 +148,7 @@ bool phConnected = false;
 bool turbidityConnected = false;
 bool orpConnected = false;
 bool ecConnected = false;
+bool ecDry = false;   // EC board present but probe out of the water
 
 // ============================================================
 // SENSOR VOLTAGES
@@ -246,6 +297,9 @@ void initAdc()
     analogSetPinAttenuation(TURBIDITY_PIN, ADC_11db);
     analogSetPinAttenuation(ORP_SENSOR_PIN, ADC_11db);
     analogSetPinAttenuation(EC_SENSOR_PIN, ADC_11db);
+#if BATTERY_ADC_PIN >= 0
+    analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+#endif
 }
 
 float readAdcAverage(int pin)
@@ -810,6 +864,7 @@ void handleSerialCommands()
             if (line == "DIAG") smsDiagnostics();
             else if (line == "PROBES") printProbeSignals();
             else if (line.startsWith("CAL") || line.startsWith("cal")) handleCalibrationCommand(line.substring(3));
+            else if (line.startsWith("AT") && modemInitialized) Serial.println(modemCommand(line, 10000));
             else if (line == "PLAIN")
             {
                 ensureFallbackPhone();
@@ -1089,11 +1144,25 @@ void pollSmsTest()
 // ============================================================
 // TEMPERATURE
 // ============================================================
+// The DS18B20 needs its DATA line held high between pulses, normally by a
+// 4.7k resistor to 3.3 V. The ESP32's internal pull-up (about 45k) is also
+// turned on as a backup: weaker, but enough for one sensor on a short
+// cable, so a missing or loose resistor no longer hides the reading.
+// OneWire's begin() sets the pin to plain INPUT, so this runs after it.
+void startTempBus()
+{
+    sensors.begin();
+    pinMode(ONE_WIRE_BUS, INPUT_PULLUP);
+    delay(5);
+    if (sensors.getDeviceCount() == 0)
+        sensors.begin();   // search again now that the line is pulled up
+}
+
 float readTemperatureC()
 {
     if (!tempSensorFound)
     {
-        sensors.begin();
+        startTempBus();
         oneWireDeviceCount = sensors.getDeviceCount();
         if (oneWireDeviceCount > 0 &&
             sensors.getAddress(tempSensorAddress, 0))
@@ -1105,19 +1174,29 @@ float readTemperatureC()
             return -127.0f;
         }
     }
-    if (!sensors.isConnected(tempSensorAddress))
+    // One corrupted 1-Wire read (modem RF noise, long or loose wire) no
+    // longer drops the sensor: each read is retried once, the last good
+    // value is kept, and it only counts as disconnected after
+    // TEMP_DROP_READS bad reads in a row. 85.0 C is the DS18B20's power-on
+    // value, which means the read happened during a brown-out.
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        sensors.requestTemperatures();
+        float temperature = sensors.getTempC(tempSensorAddress);
+        if (temperature != DEVICE_DISCONNECTED_C && temperature != 85.0f)
+        {
+            tempBadReads = 0;
+            return temperature + tempOffsetC;
+        }
+        delay(50);
+    }
+    if (++tempBadReads >= TEMP_DROP_READS)
     {
         tempSensorFound = false;
+        tempBadReads = 0;
         return -127.0f;
     }
-    sensors.requestTemperatures();
-    float temperature = sensors.getTempC(tempSensorAddress);
-    if (temperature == DEVICE_DISCONNECTED_C)
-    {
-        tempSensorFound = false;
-        return -127.0f;
-    }
-    return temperature + tempOffsetC;
+    return currentTemperature;
 }
 
 // ============================================================
@@ -1424,9 +1503,44 @@ float readORP()
 // ============================================================
 // EC  (with consecutive-read debounce — fixes false 4680 uS/cm)
 // ============================================================
+// A dry EC probe outputs about 0 V, the same as an unplugged board. The
+// pin's internal pull-up tells them apart: the EC board's output holds the
+// pin low, while a loose signal wire floats up to 3.3 V.
+bool ecBoardHoldsPinLow()
+{
+    pinMode(EC_SENSOR_PIN, INPUT_PULLUP);
+    delay(2);
+    int highs = 0;
+    for (int i = 0; i < 8; i++)
+    {
+        highs += digitalRead(EC_SENSOR_PIN);
+        delayMicroseconds(200);
+    }
+    pinMode(EC_SENSOR_PIN, INPUT);   // pull-up off before the next analog read
+    analogSetPinAttenuation(EC_SENSOR_PIN, ADC_11db);
+    return highs <= 2;
+}
+
 float readEC()
 {
     bool good = updateProbe(ecProbe);
+    ecDry = false;
+    if (!good && ecProbe.voltage < ecProbe.minV && ecProbe.spread <= PROBE_MAX_SPREAD_V)
+    {
+        if (ecBoardHoldsPinLow())
+        {
+            // Board present, probe out of the water: report 0, not disconnected.
+            ecDry = true;
+            ecProbe.badCount = 0;
+            ecProbe.goodCount = PROBE_CONNECT_READS;
+            ecProbe.connected = true;
+            ecProbe.reason = "dry - probe out of the water (0 uS/cm)";
+            ecConnected = true;
+            lastEcVoltage = ecProbe.voltage;
+            return 0.0f;
+        }
+        ecProbe.reason = "no signal - EC wire not reaching GPIO32 (pin floats high)";
+    }
     ecConnected = ecProbe.connected;
     if (!ecConnected) return 0.0f;
     if (!good) return currentEC;
@@ -1543,6 +1657,13 @@ void checkAlerts()
 // ============================================================
 void sendDataToFirebase()
 {
+    // On mobile data, publish every cellularPublishInterval instead of
+    // every sensor read.
+    bool onWifi = WiFi.status() == WL_CONNECTED;
+    if (!onWifi && lastCellularPublish &&
+        millis() - lastCellularPublish < cellularPublishInterval)
+        return;
+
     StaticJsonDocument<2048> jsonDoc;
 
     if (tempSensorFound)
@@ -1575,6 +1696,7 @@ void sendDataToFirebase()
     probeV["turbidity"] = roundf(turbidityProbe.voltage * 1000.0f) / 1000.0f;
     probeV["orp"] = roundf(orpProbe.voltage * 1000.0f) / 1000.0f;
     probeV["ec"] = roundf(ecProbe.voltage * 1000.0f) / 1000.0f;
+    jsonDoc["ec_dry"] = ecDry;
     jsonDoc["ds18b20_count"] = oneWireDeviceCount;
     JsonObject cal = jsonDoc.createNestedObject("calibrated");
     cal["temperature"] = true;   // DS18B20 is factory calibrated
@@ -1613,6 +1735,23 @@ void sendDataToFirebase()
         jsonDoc["satellites"] = 0;
     }
 
+    // Power and performance, for the Device page.
+    if (batteryPercent >= 0)
+    {
+        jsonDoc["battery_pct"] = batteryPercent;
+        jsonDoc["battery_v"] = roundf(batteryVoltage * 100.0f) / 100.0f;
+    }
+    jsonDoc["battery_source"] = batterySource;
+    jsonDoc["transport"] = onWifi ? "wifi" : "cellular";
+    jsonDoc["cellular_data"] = cellularDataReady;
+    jsonDoc["publish_interval_s"] = (onWifi ? sensorReadInterval : cellularPublishInterval) / 1000UL;
+    if (onWifi) jsonDoc["wifi_rssi"] = WiFi.RSSI();
+    jsonDoc["free_heap"] = ESP.getFreeHeap();
+    jsonDoc["min_free_heap"] = ESP.getMinFreeHeap();
+    jsonDoc["publish_ok"] = publishOk;
+    jsonDoc["publish_fail"] = publishFail;
+    jsonDoc["publish_ms"] = lastPublishDurationMs;
+
     jsonDoc["uptime_seconds"] = millis() / 1000UL;
     // Firebase fills this with its own clock on write, so the dashboard can
     // tell a live device from an old snapshot without relying on GPS time.
@@ -1624,30 +1763,208 @@ void sendDataToFirebase()
     String jsonString;
     serializeJson(jsonDoc, jsonString);
 
+    firebaseSend(firebasePath, jsonString, true);
+    if (!onWifi) lastCellularPublish = millis();
+}
+
+// ============================================================
+// READING LOG (/readings, one per minute)
+// ============================================================
+void pushReadingLog()
+{
+    if (!tempSensorFound && !phConnected && !turbidityConnected && !orpConnected && !ecConnected)
+        return;
+
+    StaticJsonDocument<768> doc;
+    JsonObject ts = doc.createNestedObject("t");
+    ts[".sv"] = "timestamp";
+    if (tempSensorFound) doc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
+    if (phConnected) doc["ph"] = roundf(currentPH * 100.0f) / 100.0f;
+    if (turbidityConnected) doc["turbidity"] = roundf(currentTurbidity * 10.0f) / 10.0f;
+    if (orpConnected) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
+    // A dry probe's 0 is not a water reading; leave it out of the training log.
+    if (ecConnected && !ecDry) doc["ec"] = roundf(currentEC * 10.0f) / 10.0f;
+
+    JsonObject cal = doc.createNestedObject("cal");
+    cal["ph"] = phCalibrated();
+    cal["turbidity"] = turbidityCalibrated;
+    cal["orp"] = orpCalibrated;
+    cal["ec"] = ecCalibrated;
+
+    if (batteryPercent >= 0) doc["battery_pct"] = batteryPercent;
+    if (gpsFix)
+    {
+        doc["lat"] = serialized(String(gpsLatitude, 6));
+        doc["lon"] = serialized(String(gpsLongitude, 6));
+    }
+    doc["via"] = WiFi.status() == WL_CONNECTED ? "wifi" : "cellular";
+
+    String body;
+    serializeJson(doc, body);
+    firebaseSend(firebaseHistoryPath, body, false);
+}
+
+// ============================================================
+// FIREBASE TRANSPORT: WiFi first, A7670 mobile data as backup
+// ============================================================
+
+// Attaches the A7670 to mobile data (PDP context 1). Retries at most once
+// per cellularAttachRetryMs so a dead SIM does not stall the loop.
+bool cellularAttach()
+{
+    if (cellularDataReady) return true;
+    if (!modemInitialized || !simReady || !gsmNetworkRegistered) return false;
+    if (lastCellularAttach && millis() - lastCellularAttach < cellularAttachRetryMs) return false;
+    lastCellularAttach = millis();
+
+    Serial.print("Cellular data: attaching, APN ");
+    Serial.println(cellularApn);
+    modemCommand(String("AT+CGDCONT=1,\"IP\",\"") + cellularApn + "\"", 5000);
+    String r = modemCommand("AT+CGACT=1,1", 30000);
+    cellularDataReady = r.indexOf("OK") >= 0;
+    if (cellularDataReady) Serial.println("Cellular data: CONNECTED");
+    else Serial.println("Cellular data: FAILED " + r);
+    return cellularDataReady;
+}
+
+// POSTs JSON over the A7670's built-in HTTPS client. Returns the HTTP
+// status, or -1 when the modem did not complete the request. Firebase
+// treats the POST as a PUT when replace is set (method override).
+int cellularHttpPost(String url, const String& body, bool replace)
+{
+    if (replace) url += "&x-http-method-override=PUT";
+
+    modemCommand("AT+HTTPTERM", 2000);
+    String r = modemCommand("AT+HTTPINIT", 10000);
+    if (r.indexOf("OK") < 0)
+    {
+        Serial.println("Cellular HTTPINIT failed: " + r);
+        return -1;
+    }
+    modemCommand("AT+CSSLCFG=\"sslversion\",0,4", 3000);
+    modemCommand("AT+CSSLCFG=\"enableSNI\",0,1", 3000);
+    modemCommand("AT+HTTPPARA=\"SSLCFG\",0", 3000);
+    modemCommand("AT+HTTPPARA=\"URL\",\"" + url + "\"", 5000);
+    modemCommand("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
+    if (replace) modemCommand("AT+HTTPPARA=\"USERDATA\",\"X-HTTP-Method-Override: PUT\"", 3000);
+
+    int status = -1;
+    String resp;
+    while (SerialAT.available()) SerialAT.read();
+    SerialAT.println("AT+HTTPDATA=" + String(body.length()) + ",10000");
+    if (modemWaitToken("DOWNLOAD", 10000, resp))
+    {
+        SerialAT.print(body);
+        resp = "";
+        if (modemWaitToken("OK", 15000, resp))
+        {
+            while (SerialAT.available()) SerialAT.read();
+            SerialAT.println("AT+HTTPACTION=1");
+            resp = "";
+            if (modemWaitToken("+HTTPACTION:", 60000, resp))
+            {
+                // Read the rest of the line: +HTTPACTION: 1,<status>,<length>
+                int at = resp.indexOf("+HTTPACTION:");
+                unsigned long started = millis();
+                while (resp.indexOf('\n', at) < 0 && millis() - started < 3000)
+                {
+                    while (SerialAT.available()) resp += (char)SerialAT.read();
+                    delay(5);
+                }
+                int comma = resp.indexOf(',', at);
+                if (comma >= 0) status = resp.substring(comma + 1).toInt();
+            }
+        }
+    }
+    if (status < 0) Serial.println("Cellular HTTP failed: " + resp);
+    modemCommand("AT+HTTPTERM", 2000);
+    return status;
+}
+
+// replace=true overwrites the node (PUT), false appends a child (POST).
+bool firebaseSend(const char* path, const String& body, bool replace)
+{
+    unsigned long started = millis();
+    int code = -1;
     if (WiFi.status() == WL_CONNECTED)
     {
+        lastTransport = "wifi";
         HTTPClient http;
-        String url = String("https://") + firebaseHost + firebasePath + "?auth=" + firebaseAuth;
         http.setTimeout(10000);
-        http.begin(url);
+        http.begin(firebaseUrl(path));
         http.addHeader("Content-Type", "application/json");
-        int response = http.PUT(jsonString);
-        if (response > 0)
-        {
-            Serial.print("Firebase PUT: ");
-            Serial.println(response);
-        }
-        else
-        {
-            Serial.print("Firebase ERROR: ");
-            Serial.println(response);
-        }
+        code = replace ? http.PUT(body) : http.POST(body);
         http.end();
+    }
+    else if (cellularAttach())
+    {
+        lastTransport = "cellular";
+        code = cellularHttpPost(firebaseUrl(path), body, replace);
+        if (code < 0) cellularDataReady = false;   // re-attach on the next try
     }
     else
     {
-        Serial.println("Firebase skipped: WiFi offline.");
+        lastTransport = "none";
+        Serial.println("Firebase skipped: no WiFi and no cellular data.");
+        return false;
     }
+
+    lastPublishDurationMs = millis() - started;
+    bool ok = code >= 200 && code < 300;
+    if (ok) publishOk++;
+    else publishFail++;
+    Serial.printf("Firebase %s via %s: %d (%lu ms)\n",
+                  replace ? "PUT" : "POST", lastTransport, code, lastPublishDurationMs);
+    return ok;
+}
+
+// ============================================================
+// BATTERY
+// ============================================================
+
+// Single-cell LiPo voltage to charge, interpolated between these points.
+int batteryPercentFromVoltage(float v)
+{
+    static const float volts[] = {3.30f, 3.50f, 3.60f, 3.70f, 3.75f, 3.80f, 3.85f, 3.90f, 4.00f, 4.10f, 4.20f};
+    static const int pct[]     = {0,     5,     10,    20,    30,    40,    50,    60,    75,    90,    100};
+    const int n = sizeof(pct) / sizeof(pct[0]);
+    if (v <= volts[0]) return 0;
+    if (v >= volts[n - 1]) return 100;
+    for (int i = 1; i < n; i++)
+    {
+        if (v <= volts[i])
+            return (int)roundf(pct[i - 1] + (v - volts[i - 1]) * (pct[i] - pct[i - 1]) / (volts[i] - volts[i - 1]));
+    }
+    return 100;
+}
+
+void readBattery()
+{
+    float v = 0.0f;
+#if BATTERY_ADC_PIN >= 0
+    v = rawToVoltage(readAdcAverage(BATTERY_ADC_PIN)) * BATTERY_DIVIDER_RATIO;
+    batterySource = "adc";
+#else
+    if (!modemInitialized) return;
+    String r = modemCommand("AT+CBC", 3000);   // +CBC: 3.950V
+    int at = r.indexOf("+CBC:");
+    if (at < 0) return;
+    int end = r.indexOf('\n', at);
+    String field = r.substring(at + 5, end > 0 ? end : r.length());
+    int comma = field.lastIndexOf(',');
+    if (comma >= 0) field = field.substring(comma + 1);
+    field.trim();
+    v = field.toFloat();
+    if (v > 100.0f) v /= 1000.0f;   // some firmware reports millivolts
+    batterySource = "modem";
+#endif
+    if (v < 2.5f || v > 5.0f)
+    {
+        batteryPercent = -1;
+        return;
+    }
+    batteryVoltage = v;
+    batteryPercent = batteryPercentFromVoltage(v);
 }
 
 // ============================================================
@@ -1710,7 +2027,8 @@ void readAllSensors()
     else Serial.println("DISCONNECTED");
 
     Serial.print("EC          : ");
-    if (ecConnected) { Serial.print(currentEC, 1); Serial.println(ecCalibrated ? " uS/cm" : " uS/cm  (NOT CALIBRATED)"); }
+    if (ecConnected && ecDry) Serial.println("0.0 uS/cm  (probe dry / in air)");
+    else if (ecConnected) { Serial.print(currentEC, 1); Serial.println(ecCalibrated ? " uS/cm" : " uS/cm  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     printProbeSignals();
@@ -1738,6 +2056,14 @@ void readAllSensors()
     else if (!modemInitialized) Serial.println("MODEM OFFLINE");
     else if (!gpsEnabled) Serial.println("DISABLED");
     else Serial.println("SEARCHING...");
+
+    Serial.print("Battery     : ");
+    if (batteryPercent >= 0) Serial.printf("%d%% (%.2f V, %s)\n", batteryPercent, batteryVoltage, batterySource);
+    else Serial.println("UNKNOWN");
+    Serial.print("Data link   : ");
+    if (WiFi.status() == WL_CONNECTED) Serial.printf("WiFi (%d dBm)\n", WiFi.RSSI());
+    else if (cellularDataReady) Serial.println("CELLULAR (A7670)");
+    else Serial.println("NONE");
 
     Serial.println("========================================");
 
@@ -1790,16 +2116,16 @@ void setup()
     Serial.println("#          SHELLSAFE SYSTEM            #");
     Serial.println("#                                      #");
     Serial.println("# ESP32-WROVER-E T-CALL A7670 V1.0    #");
-    Serial.println("# Firmware: probe-diag v4 (EC zero)    #");
+    Serial.println("# Firmware: v5 (LTE backup, battery)   #");
     Serial.println("#                                      #");
-    Serial.println("# A7670 = SMS + GPS                    #");
-    Serial.println("# WiFi  = Firebase                     #");
+    Serial.println("# A7670 = SMS + GPS + LTE backup       #");
+    Serial.println("# WiFi  = Firebase (primary)           #");
     Serial.println("#                                      #");
     Serial.println("########################################");
 
     initAdc();
 
-    sensors.begin();
+    startTempBus();
     sensors.setResolution(12);
     sensors.setWaitForConversion(true);
 
@@ -1842,9 +2168,12 @@ void setup()
     Serial.println(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE");
     Serial.println("========================================");
 
+    readBattery();
+
     lastGpsRead = millis();
     lastSensorRead = millis();
     lastGsmCheck = millis();
+    lastBatteryRead = millis();
 
     pollSmsTest();
 }
@@ -1870,6 +2199,7 @@ void loop()
         {
             gsmNetworkRegistered = modem.isNetworkConnected();
             gsmSignalQuality = modem.getSignalQuality();
+            if (!gsmNetworkRegistered) cellularDataReady = false;
             Serial.print("A7670 GSM: ");
             Serial.print(gsmNetworkRegistered ? "REGISTERED" : "NOT REGISTERED");
             Serial.print(" | Signal: ");
@@ -1886,6 +2216,18 @@ void loop()
         readGPS();
         readAllSensors();
         sendDataToFirebase();
+
+        if (now - lastHistoryPush >= historyInterval)
+        {
+            lastHistoryPush = now;
+            pushReadingLog();
+        }
+    }
+
+    if (now - lastBatteryRead >= batteryReadInterval)
+    {
+        lastBatteryRead = now;
+        readBattery();
     }
 
     if (WiFi.status() != WL_CONNECTED && now - lastWiFiReconnect >= 30000UL)

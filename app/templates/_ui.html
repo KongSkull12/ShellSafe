@@ -29,6 +29,21 @@
 </section>
 {% endmacro %}
 
+{% macro prediction(m) %}
+{% set level = ('high' if m.label == 'bloom' else 'normal') if m.has_prediction else 'none' %}
+<section class="risk" data-prediction data-level="{{ level }}" aria-live="polite">
+    <span class="risk-icon" aria-hidden="true"><i class="bi bi-diagram-3"></i></span>
+    <div class="risk-text">
+        <p class="risk-title">ML prediction: <span data-prediction-title>{{ m.title if m.has_prediction else ('Not trained' if not m.available else 'Unavailable') }}</span></p>
+        <p class="risk-msg" data-prediction-msg>{{ m.message }}{% if m.demo %} Demo model, not validated.{% endif %}</p>
+    </div>
+    <div class="risk-score" data-prediction-score-wrap {% if m.probability is not defined or m.probability is none %}hidden{% endif %}>
+        <strong data-prediction-score>{{ '%.0f'|format(m.probability * 100) if m.probability is defined and m.probability is not none else '' }}</strong>
+        <span>% bloom</span>
+    </div>
+</section>
+{% endmacro %}
+
 {% macro metrics(live) %}
 <section class="metrics" aria-label="Current readings">
     {% for s in live.sensors %}

@@ -9,6 +9,7 @@
     <li><a href="{{ url_for(alerts_ep) }}" {% if request.endpoint in (alerts_ep, 'main.recently_deleted') %}aria-current="page"{% endif %}><i class="bi bi-bell" aria-hidden="true"></i><span>Alerts</span>{% if unread_alert_count|int %}<span class="nav-count" aria-label="{{ unread_alert_count }} unread">{{ unread_alert_count }}</span>{% endif %}</a></li>
     {% if is_admin %}
     <li><a href="{{ url_for('main.data_history') }}" {% if request.endpoint == 'main.data_history' %}aria-current="page"{% endif %}><i class="bi bi-graph-up" aria-hidden="true"></i><span>Data history</span></a></li>
+    <li><a href="{{ url_for('main.ml_model') }}" {% if request.endpoint == 'main.ml_model' %}aria-current="page"{% endif %}><i class="bi bi-diagram-3" aria-hidden="true"></i><span>Prediction model</span></a></li>
     <li><a href="{{ url_for('main.devices') }}" {% if request.endpoint == 'main.devices' %}aria-current="page"{% endif %}><i class="bi bi-cpu" aria-hidden="true"></i><span>Device</span></a></li>
     <li><a href="{{ url_for('main.reports') }}" {% if request.endpoint in ('main.reports', 'main.deleted_reports_view') %}aria-current="page"{% endif %}><i class="bi bi-file-earmark-text" aria-hidden="true"></i><span>Reports</span></a></li>
     <li class="nav-label">Settings</li>

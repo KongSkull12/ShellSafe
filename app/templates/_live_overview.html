@@ -1,4 +1,4 @@
-{% from "_ui.html" import risk, metrics, chart_panel, flashes with context %}
+{% from "_ui.html" import risk, prediction, metrics, chart_panel, flashes with context %}
 {# Expects: live, history, alerts, alerts_endpoint #}
 <div class="page-head">
     <div class="page-head-text">
@@ -13,6 +13,23 @@
 {{ flashes() }}
 
 {{ risk(live.risk_assessment) }}
+
+{{ prediction(live.ml_prediction) }}
+<script>
+document.addEventListener('shellsafe:live', function (event) {
+    const m = event.detail.payload.ml_prediction || {};
+    const root = document.querySelector('[data-prediction]');
+    if (!root) return;
+    root.dataset.level = m.has_prediction ? (m.label === 'bloom' ? 'high' : 'normal') : 'none';
+    root.querySelector('[data-prediction-title]').textContent =
+        m.has_prediction ? m.title : (m.available ? 'Unavailable' : 'Not trained');
+    root.querySelector('[data-prediction-msg]').textContent =
+        (m.message || '') + (m.demo ? ' Demo model, not validated.' : '');
+    const hasP = m.has_prediction && m.probability != null;
+    root.querySelector('[data-prediction-score-wrap]').hidden = !hasP;
+    root.querySelector('[data-prediction-score]').textContent = hasP ? Math.round(m.probability * 100) : '';
+});
+</script>
 
 {{ metrics(live) }}
 

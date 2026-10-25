@@ -130,6 +130,18 @@ def _wall_clock_epoch(timestamp) -> Optional[float]:
     return dt.replace(tzinfo=timezone.utc).timestamp()
 
 
+def _offline_timeout(raw: Dict) -> int:
+    """
+    On mobile data the firmware publishes every 30 s instead of 5 s, so
+    allow a few of its own intervals before calling it offline.
+    """
+    try:
+        interval = float(raw.get('publish_interval_s') or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    return max(DEVICE_OFFLINE_TIMEOUT_SECONDS, int(interval * 2.5))
+
+
 def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[str, Optional[float]]:
     """
     Decide whether the device is publishing right now.
@@ -144,12 +156,13 @@ def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[s
     now = time.time()
     if not has_sensor_payload:
         return 'offline', None
+    timeout = _offline_timeout(raw)
 
     server_ts = raw.get('server_ts')
     if isinstance(server_ts, (int, float)) and server_ts > 1e12:
         seen = server_ts / 1000.0
         age = now - seen
-        return ('live' if age <= DEVICE_OFFLINE_TIMEOUT_SECONDS else 'offline'), seen
+        return ('live' if age <= timeout else 'offline'), seen
 
     wall_seen = _wall_clock_epoch(_reading_timestamp(raw))
 
@@ -173,7 +186,7 @@ def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[s
                     'first_seen_at': now,
                 }
                 if wall_seen is not None:
-                    fresh = (now - wall_seen) <= DEVICE_OFFLINE_TIMEOUT_SECONDS
+                    fresh = (now - wall_seen) <= timeout
                     return ('live' if fresh else 'offline'), wall_seen
                 return 'checking', None
 
@@ -187,19 +200,19 @@ def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[s
 
             last_progress_at = state.get('last_progress_at')
             if last_progress_at is not None:
-                if (now - last_progress_at) <= DEVICE_OFFLINE_TIMEOUT_SECONDS:
+                if (now - last_progress_at) <= timeout:
                     return 'live', last_progress_at
                 return 'offline', last_progress_at
 
             # Never seen it move. Give it one timeout window, then call it.
-            if (now - float(state.get('first_seen_at', now))) <= DEVICE_OFFLINE_TIMEOUT_SECONDS:
-                if wall_seen is not None and (now - wall_seen) > DEVICE_OFFLINE_TIMEOUT_SECONDS:
+            if (now - float(state.get('first_seen_at', now))) <= timeout:
+                if wall_seen is not None and (now - wall_seen) > timeout:
                     return 'offline', wall_seen
                 return 'checking', wall_seen
             return 'offline', wall_seen
 
     if wall_seen is not None:
-        fresh = (now - wall_seen) <= DEVICE_OFFLINE_TIMEOUT_SECONDS
+        fresh = (now - wall_seen) <= timeout
         return ('live' if fresh else 'offline'), wall_seen
 
     # A payload with no clock of any kind: trust it as live.
@@ -308,13 +321,25 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         # Per-probe calibration flags from firmware; missing means unknown (older firmware).
         'calibrated': raw.get('calibrated') if isinstance(raw.get('calibrated'), dict) else {},
         'uptime_seconds': raw.get('uptime_seconds'),
+        # Power and performance (firmware v5+); None on older firmware.
+        'battery_pct': _to_float(raw.get('battery_pct')),
+        'battery_v': _to_float(raw.get('battery_v')),
+        'battery_source': raw.get('battery_source'),
+        'transport': raw.get('transport'),
+        'cellular_data': raw.get('cellular_data'),
+        'wifi_rssi': _to_float(raw.get('wifi_rssi')),
+        'free_heap': _to_float(raw.get('free_heap')),
+        'min_free_heap': _to_float(raw.get('min_free_heap')),
+        'publish_ok': _to_float(raw.get('publish_ok')),
+        'publish_fail': _to_float(raw.get('publish_fail')),
+        'publish_ms': _to_float(raw.get('publish_ms')),
         'timestamp': reading_timestamp,
         'link_state': link_state,
         'last_seen_epoch': last_seen_epoch,
         'last_update': 'just now' if is_online else humanize_age(last_seen_age),
         'is_online': is_online,
         'is_stale': not is_online,
-        'offline_timeout_seconds': DEVICE_OFFLINE_TIMEOUT_SECONDS,
+        'offline_timeout_seconds': _offline_timeout(raw),
         'source': 'realtime_db',
     }
 
@@ -427,6 +452,48 @@ def get_live_history() -> List[Dict]:
     """Readings captured since the server started, oldest first."""
     with _history_lock:
         return list(_history)
+
+
+READINGS_PATH = '/readings'
+_stored_cache: Dict[str, object] = {'data': None, 'expires': 0.0, 'limit': 0}
+_STORED_CACHE_TTL = 30.0
+
+
+def get_stored_history(limit: int = 720) -> List[Dict]:
+    """
+    Per-minute readings the firmware logs to /readings (firmware v5+), in
+    the same shape as get_live_history(). Survives server restarts and
+    works on Vercel, where the in-memory history does not persist.
+    """
+    now = time.time()
+    if _stored_cache['data'] is not None and now < float(_stored_cache['expires']) \
+            and int(_stored_cache['limit']) >= limit:
+        return list(_stored_cache['data'])[-limit:]  # type: ignore[arg-type]
+
+    initialize_firebase()
+    try:
+        data = db.reference(READINGS_PATH).order_by_key().limit_to_last(limit).get() or {}
+    except Exception:
+        return []
+
+    samples = []
+    for record in data.values():
+        if not isinstance(record, dict) or not isinstance(record.get('t'), (int, float)):
+            continue
+        sample = {'t': record['t'] / 1000.0}
+        for spec_key, *_rest in SENSOR_SPECS:
+            sample[spec_key] = _to_float(record.get(spec_key))
+        samples.append(sample)
+    samples.sort(key=lambda s: s['t'])
+
+    _stored_cache.update({'data': samples, 'expires': now + _STORED_CACHE_TTL, 'limit': limit})
+    return samples
+
+
+def get_history(limit: int = 720) -> List[Dict]:
+    """Stored per-minute log when the firmware writes one, else this server's memory."""
+    stored = get_stored_history(limit)
+    return stored if stored else get_live_history()[-limit:]
 
 
 def get_latest_sensor_data(use_cache: bool = True) -> Optional[Dict]:
