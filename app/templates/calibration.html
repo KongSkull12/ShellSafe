@@ -1,0 +1,365 @@
+{% extends "dashboard_base.html" %}
+
+{% block styles %}
+<style>
+    .cal-list { display: grid; gap: 16px; }
+    .cal-saved { color: var(--text-3); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .panel-head > .cal-live { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 14px; color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .cal-live strong { color: var(--text); font-weight: 600; }
+    .cal-steps { display: grid; }
+    .cal-step {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 24px; align-items: center;
+        padding: 14px 0; border-top: 1px solid var(--border);
+    }
+    .cal-step:first-child { border-top: 0; padding-top: 2px; }
+    .cal-step-title { font-weight: 500; }
+    .cal-step-text { color: var(--text-2); font-size: 13px; max-width: 62ch; }
+    .cal-step-actions { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: flex-end; gap: 8px; }
+    .cal-step-actions .field { width: 132px; }
+    .cal-step-actions .field label { font-size: 12px; color: var(--text-2); font-weight: 500; }
+    .cal-result { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border-radius: var(--r); font-size: 13px; background: var(--surface-2); color: var(--text-2); }
+    .cal-result[hidden] { display: none; }
+    .cal-result i { margin-top: 1px; }
+    .cal-result[data-status="done"] { background: var(--ok-soft); color: var(--ok-text); }
+    .cal-result[data-status="failed"] { background: var(--bad-soft); color: var(--bad-text); }
+    .cal-result[data-status="pending"], .cal-result[data-status="running"] { background: var(--accent-soft); color: var(--accent); }
+    .cal-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+    @media (max-width: 680px) {
+        .cal-step { grid-template-columns: minmax(0, 1fr); }
+        .cal-step-actions { justify-content: flex-start; }
+        .panel-head > .cal-live { justify-content: flex-start; }
+    }
+</style>
+{% endblock %}
+
+{% macro value_field(id, label, value, unit, min, max, step='any') %}
+<div class="field">
+    <label for="{{ id }}">{{ label }}{% if unit %} ({{ unit }}){% endif %}</label>
+    <input class="input" type="number" inputmode="decimal" id="{{ id }}" value="{{ value }}" min="{{ min }}" max="{{ max }}" step="{{ step }}">
+</div>
+{% endmacro %}
+
+{% macro run_button(step, label, input_id=None, quiet=False) %}
+<button type="button" class="btn {{ 'btn-quiet' if quiet else 'btn-primary' }}" data-cal-step="{{ step }}" {% if input_id %}data-cal-input="{{ input_id }}"{% endif %}>{{ label }}</button>
+{% endmacro %}
+
+{% macro probe_head(key, label, signal_label) %}
+<div class="panel-head">
+    <div>
+        <h2 id="cal-{{ key }}">{{ label }}</h2>
+        <p class="cal-saved" data-cal-saved="{{ key }}">—</p>
+    </div>
+    <div class="cal-live">
+        <span>{{ signal_label }} <strong data-cal-signal="{{ key }}">—</strong></span>
+        <span>Reading <strong data-cal-reading="{{ key }}">—</strong></span>
+        <span class="tag" data-cal-tag="{{ key }}">—</span>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro result_box(key) %}
+<div class="cal-result" data-cal-result="{{ key }}" role="status" aria-live="polite" hidden>
+    <i class="bi bi-info-circle" aria-hidden="true"></i><span></span>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Calibration</h1>
+        <p>Put the probe in the solution, wait until its signal stops changing, then run the step. The device takes about 2 seconds to measure and saves the result in its own memory, so it survives restarts.</p>
+    </div>
+</div>
+
+<div class="flash flash-warning" role="status" id="calOffline" {% if live.link.state == 'live' %}hidden{% endif %}>
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <p>The device is not live. Calibration steps run on the device itself, so it must be powered and online over WiFi.</p>
+</div>
+
+<div class="cal-list">
+    <section class="panel" aria-labelledby="cal-ph" data-cal-probe="ph">
+        {{ probe_head('ph', 'pH', 'Signal') }}
+        <div class="cal-steps">
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">1. pH 7.00 buffer</p>
+                    <p class="cal-step-text">Rinse the probe with clean water, put it in the pH 7.00 buffer and wait 1–2 minutes.</p>
+                </div>
+                <div class="cal-step-actions">{{ run_button('PH7', 'Calibrate pH 7.00') }}</div>
+            </div>
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">2. Second buffer</p>
+                    <p class="cal-step-text">Rinse again, then use the pH 4.00 buffer (or pH 10.00 if that is what you have). pH counts as calibrated after both steps.</p>
+                </div>
+                <div class="cal-step-actions">
+                    {{ run_button('PH4', 'Calibrate pH 4.00') }}
+                    {{ run_button('PH10', 'pH 10.00', quiet=True) }}
+                </div>
+            </div>
+        </div>
+        {{ result_box('ph') }}
+    </section>
+
+    <section class="panel" aria-labelledby="cal-ec" data-cal-probe="ec">
+        {{ probe_head('ec', 'EC', 'Signal') }}
+        <div class="cal-steps">
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">1. Dry zero (optional)</p>
+                    <p class="cal-step-text">Rinse and dry the probe and hold it in the air. Only needed if the signal in air is above about 0.02 V.</p>
+                </div>
+                <div class="cal-step-actions">{{ run_button('EC0', 'Set dry zero', quiet=True) }}</div>
+            </div>
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">2. Conductivity standard</p>
+                    <p class="cal-step-text">Put the probe in the standard and wait until the reading stops changing. Enter the value printed on the bottle.</p>
+                </div>
+                <div class="cal-step-actions">
+                    {{ value_field('calEcValue', 'Standard', 12880, 'µS/cm', 1, 200000) }}
+                    {{ run_button('EC', 'Calibrate EC', 'calEcValue') }}
+                </div>
+            </div>
+        </div>
+        {{ result_box('ec') }}
+    </section>
+
+    <section class="panel" aria-labelledby="cal-turbidity" data-cal-probe="turbidity">
+        {{ probe_head('turbidity', 'Turbidity', 'Signal') }}
+        <div class="cal-steps">
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">1. Clean water</p>
+                    <p class="cal-step-text">Put the probe in clear water so the gap between the prongs is filled. This sets 0 NTU.</p>
+                </div>
+                <div class="cal-step-actions">{{ run_button('TURB0', 'Set 0 NTU') }}</div>
+            </div>
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">2. Turbidity standard (optional)</p>
+                    <p class="cal-step-text">Sets the NTU scale. Without it, readings above 0 use an estimated scale.</p>
+                </div>
+                <div class="cal-step-actions">
+                    {{ value_field('calTurbValue', 'Standard', 100, 'NTU', 0.1, 4000) }}
+                    {{ run_button('TURB', 'Calibrate scale', 'calTurbValue', quiet=True) }}
+                </div>
+            </div>
+        </div>
+        {{ result_box('turbidity') }}
+    </section>
+
+    <section class="panel" aria-labelledby="cal-orp" data-cal-probe="orp">
+        {{ probe_head('orp', 'ORP', 'Signal') }}
+        <div class="cal-steps">
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">Reference solution</p>
+                    <p class="cal-step-text">Put the probe in the ORP reference solution and wait 1–2 minutes. Enter the value printed on the bottle.</p>
+                </div>
+                <div class="cal-step-actions">
+                    {{ value_field('calOrpValue', 'Solution', 256, 'mV', -2000, 2000) }}
+                    {{ run_button('ORP', 'Calibrate ORP', 'calOrpValue') }}
+                </div>
+            </div>
+        </div>
+        {{ result_box('orp') }}
+    </section>
+
+    <section class="panel" aria-labelledby="cal-temperature" data-cal-probe="temperature">
+        {{ probe_head('temperature', 'Temperature', 'Sensors') }}
+        <div class="cal-steps">
+            <div class="cal-step">
+                <div>
+                    <p class="cal-step-title">Offset (optional)</p>
+                    <p class="cal-step-text">The DS18B20 is factory calibrated. Only use this to match a trusted thermometer placed next to it.</p>
+                </div>
+                <div class="cal-step-actions">
+                    {{ value_field('calTempValue', 'Thermometer', '', '°C', -10, 60, '0.1') }}
+                    {{ run_button('TEMP', 'Set offset', 'calTempValue', quiet=True) }}
+                </div>
+            </div>
+        </div>
+        {{ result_box('temperature') }}
+    </section>
+
+    <section class="panel" aria-labelledby="calResetTitle">
+        <div class="cal-danger">
+            <div>
+                <h2 id="calResetTitle">Reset all calibration</h2>
+                <p class="cal-step-text">Clears every saved point on the device and restarts it. All probes then need calibrating again.</p>
+            </div>
+            <button type="button" class="btn btn-danger" data-cal-step="RESET">Reset calibration</button>
+        </div>
+        {{ result_box('reset') }}
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const RUN_URL = {{ url_for('main.calibration_run')|tojson }};
+    const STATUS_URL = {{ url_for('main.calibration_status')|tojson }};
+    const PROBE_OF = { PH7: 'ph', PH4: 'ph', PH10: 'ph', EC0: 'ec', EC: 'ec', TURB0: 'turbidity', TURB: 'turbidity', ORP: 'orp', TEMP: 'temperature', RESET: 'reset' };
+    const ICONS = { pending: 'bi-hourglass-split', running: 'bi-hourglass-split', done: 'bi-check-circle-fill', failed: 'bi-x-circle-fill' };
+    const buttons = Array.from(document.querySelectorAll('[data-cal-step]'));
+    let deviceLive = {{ 'true' if live.link.state == 'live' else 'false' }};
+    let busy = false;
+    let pollTimer = null;
+    let activeProbe = null;
+
+    const fmt = function (v, d) { return v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v).toFixed(d); };
+    const $ = function (sel) { return document.querySelector(sel); };
+
+    function setButtons() {
+        buttons.forEach(function (b) { b.disabled = busy || !deviceLive; });
+    }
+
+    function showResult(probe, status, text) {
+        document.querySelectorAll('[data-cal-result]').forEach(function (box) {
+            if (box.dataset.calResult !== probe) return;
+            box.hidden = false;
+            box.dataset.status = status;
+            box.querySelector('i').className = 'bi ' + (ICONS[status] || 'bi-info-circle');
+            box.querySelector('span').textContent = text;
+        });
+    }
+
+    function stepOf(command) { return String(command || '').split(' ')[0].toUpperCase(); }
+
+    function applyStatus(c) {
+        if (!c || !c.command) return;
+        const probe = PROBE_OF[stepOf(c.command)] || activeProbe;
+        let status = c.status;
+        let text = c.detail || '';
+        if (c.stale && (status === 'pending' || status === 'running')) {
+            text = status === 'pending'
+                ? 'The device did not pick up this step. Check that it is online, then try again.'
+                : 'The device did not finish this step. Try again.';
+            status = 'failed';
+        }
+        showResult(probe, status, text);
+        busy = (status === 'pending' || status === 'running');
+        setButtons();
+        if (busy) startPolling(); else stopPolling();
+    }
+
+    function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+    function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(async function () {
+            try {
+                const res = await fetch(STATUS_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                if (res.ok) applyStatus((await res.json()).calibration);
+            } catch (err) { /* keep polling */ }
+        }, 2000);
+    }
+
+    async function run(button) {
+        const step = button.dataset.calStep;
+        const probe = PROBE_OF[step];
+        let value = null;
+        if (button.dataset.calInput) {
+            const input = document.getElementById(button.dataset.calInput);
+            value = input.value.trim();
+            if (value === '' || !input.checkValidity()) {
+                input.setAttribute('aria-invalid', 'true');
+                input.focus();
+                showResult(probe, 'failed', `Enter a value between ${input.min} and ${input.max}.`);
+                return;
+            }
+            input.removeAttribute('aria-invalid');
+        }
+        if (step === 'RESET' && !window.confirm('Clear every saved calibration point on the device? All probes will need calibrating again.')) return;
+
+        activeProbe = probe;
+        busy = true;
+        setButtons();
+        const label = button.innerHTML;
+        button.innerHTML = '<span class="spin" aria-hidden="true"></span> Sending…';
+        showResult(probe, 'pending', 'Sending the step to the device…');
+        try {
+            const res = await fetch(RUN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ step: step, value: value }),
+                cache: 'no-store',
+            });
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok || !data.ok) throw new Error(data.error || 'The step could not be sent. Try again.');
+            applyStatus(data.calibration);
+        } catch (err) {
+            busy = false;
+            setButtons();
+            showResult(probe, 'failed', err.message);
+        } finally {
+            button.innerHTML = label;
+        }
+    }
+
+    buttons.forEach(function (b) { b.addEventListener('click', function () { run(b); }); });
+    document.querySelectorAll('.cal-step-actions .input').forEach(function (input) {
+        input.addEventListener('input', function () { input.removeAttribute('aria-invalid'); });
+    });
+
+    function setTag(key, text, kind) {
+        const tag = $(`[data-cal-tag="${key}"]`);
+        if (!tag) return;
+        tag.textContent = text;
+        tag.className = 'tag' + (kind ? ` tag-${kind}` : '');
+    }
+    function setText(sel, text) { const el = $(sel); if (el) el.textContent = text; }
+
+    function renderLive(payload) {
+        const d = payload.sensor_data || {};
+        const pv = d.probe_voltage || {};
+        const cal = d.calibrated || {};
+        const info = d.cal_info || {};
+        deviceLive = (payload.link || {}).state === 'live';
+        $('#calOffline').hidden = deviceLive;
+        setButtons();
+
+        (payload.sensors || []).forEach(function (s) {
+            // Uncalibrated probes display volts, so use display_unit, not the probe's unit.
+            const unit = (s.display_unit || '').trim();
+            setText(`[data-cal-reading="${s.key}"]`, s.state === 'live' ? `${s.display}${unit ? ' ' + unit : ''}` : (s.state_label || '—'));
+        });
+        ['ph', 'ec', 'turbidity', 'orp'].forEach(function (k) {
+            const v = fmt(pv[k], 3);
+            setText(`[data-cal-signal="${k}"]`, v == null ? '—' : `${v} V`);
+        });
+        setText('[data-cal-signal="temperature"]', d.ds18b20_count == null ? '—' : `${d.ds18b20_count} found`);
+
+        const known = Object.keys(info).length > 0;
+        if (cal.ph) setTag('ph', 'Calibrated', 'ok');
+        else if (info.ph7_set || info.ph2_set) setTag('ph', 'Half done', 'warning');
+        else setTag('ph', 'Not calibrated', 'warning');
+        setTag('ec', cal.ec ? 'Calibrated' : 'Not calibrated', cal.ec ? 'ok' : 'warning');
+        setTag('turbidity', cal.turbidity ? 'Calibrated' : 'Not calibrated', cal.turbidity ? 'ok' : 'warning');
+        setTag('orp', cal.orp ? 'Calibrated' : 'Not calibrated', cal.orp ? 'ok' : 'warning');
+        setTag('temperature', 'Factory calibrated', 'ok');
+
+        if (!known) {
+            ['ph', 'ec', 'turbidity', 'orp', 'temperature'].forEach(function (k) {
+                setText(`[data-cal-saved="${k}"]`, 'Saved points appear once the device runs firmware v5.1.');
+            });
+            return;
+        }
+        const ph = [];
+        if (info.ph7_set) ph.push(`pH 7.00 at ${fmt(info.ph_v7, 3)} V`);
+        if (info.ph2_set) ph.push(`pH ${fmt(info.ph_p2, 2)} at ${fmt(info.ph_v2, 3)} V`);
+        setText('[data-cal-saved="ph"]', ph.length ? 'Saved: ' + ph.join(' · ') : 'No buffer points saved yet.');
+        setText('[data-cal-saved="ec"]', cal.ec ? `Saved: K ${fmt(info.ec_k, 3)} · dry zero ${fmt(info.ec_v0, 3)} V` : `Dry zero ${fmt(info.ec_v0, 3)} V · no standard saved yet.`);
+        setText('[data-cal-saved="turbidity"]', cal.turbidity ? `Saved: clean water at ${fmt(info.turb_v0, 3)} V` : 'No clean-water point saved yet.');
+        setText('[data-cal-saved="orp"]', cal.orp ? `Saved: offset ${fmt(info.orp_off, 1)} mV` : 'No reference point saved yet.');
+        setText('[data-cal-saved="temperature"]', `Offset ${fmt(info.t_off, 2)} °C`);
+    }
+
+    document.addEventListener('shellsafe:live', function (event) { renderLive(event.detail.payload); });
+    renderLive({{ live|tojson }});
+    setButtons();
+    applyStatus({{ calibration|tojson }});
+})();
+</script>
+{% endblock %}

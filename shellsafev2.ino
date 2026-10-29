@@ -52,7 +52,7 @@ const float ALERT_PH_MIN = 6.5f;
 const float ALERT_PH_MAX = 8.5f;
 const float ALERT_TURBIDITY_MAX = 50.0f;
 const float ALERT_TEMP_MAX = 35.0f;
-const float ALERT_ORP_MIN = 200.0f;
+const float ALERT_ORP_MIN = -200.0f;   // matches the web Alert min (normal 0-1000 mV)
 const float ALERT_EC_MAX = 2000.0f;
 
 // ============================================================
@@ -68,6 +68,17 @@ unsigned long lastSmsPoll = 0;
 const unsigned long smsPollInterval = 15000UL;
 unsigned long lastSmsTime = 0;
 const unsigned long smsCooldown = 60000UL;
+
+// ============================================================
+// REMOTE CALIBRATION
+// The web app's Calibration page writes one step to /cal_command; the
+// device runs it like the serial CAL command and writes the result back.
+// ============================================================
+const char* firebaseCalPath = "/cal_command.json";
+unsigned long lastCalPoll = 0;
+const unsigned long calPollInterval = 5000UL;
+String lastCalCommandId;
+String calDetail;   // outcome of the last CAL step, shown on the web page
 
 // ============================================================
 // WIFI / FIREBASE
@@ -206,7 +217,7 @@ void handleSerialCommands();
 bool deliverSMS(const String& phone, const String& message);
 void ensureFallbackPhone();
 void printProbeSignals();
-void handleCalibrationCommand(String cmd);
+bool handleCalibrationCommand(String cmd);
 
 float gpsLatitude = 0.0f;
 float gpsLongitude = 0.0f;
@@ -1315,6 +1326,13 @@ void printCalibrationHelp()
     Serial.println("  CAL RESET        forget all calibration");
 }
 
+// Prints a calibration message and keeps it for the web page.
+void calSay(const String& message)
+{
+    Serial.println(message);
+    calDetail = message;
+}
+
 // Averages several fresh, stable checks of one probe. Returns false if the
 // probe is not giving a usable signal right now.
 bool sampleProbeVoltage(ProbeState& p, float& volts)
@@ -1328,11 +1346,8 @@ bool sampleProbeVoltage(ProbeState& p, float& volts)
     }
     if (good < 4)
     {
-        Serial.print("CAL FAILED: ");
-        Serial.print(p.name);
-        Serial.print(" signal not stable (");
-        Serial.print(p.reason);
-        Serial.println(")");
+        calSay(String("CAL FAILED: ") + p.name + " signal not stable (" + p.reason +
+               "). Wait for the reading to settle and try again.");
         return false;
     }
     volts = sum / good;
@@ -1358,14 +1373,17 @@ bool sampleRawVoltage(int pin, float& volts)
     }
     if (v[6] - v[0] > PROBE_MAX_SPREAD_V)
     {
-        Serial.println("CAL FAILED: signal not steady. Wait for the reading to settle and try again.");
+        calSay("CAL FAILED: signal not steady. Wait for the reading to settle and try again.");
         return false;
     }
     volts = v[3];
     return true;
 }
 
-void handleCalibrationCommand(String cmd)
+// Runs one calibration step (from the serial CAL command or the web page).
+// Returns true when a value was measured and saved; calDetail says what
+// happened either way.
+bool handleCalibrationCommand(String cmd)
 {
     cmd.trim();
     cmd.toUpperCase();
@@ -1375,9 +1393,10 @@ void handleCalibrationCommand(String cmd)
     if (space >= 0) { arg = cmd.substring(space + 1); arg.trim(); }
     float value = arg.toFloat();
     float v = 0.0f;
+    calDetail = "";
 
-    if (what == "HELP" || what == "") { printCalibrationHelp(); return; }
-    if (what == "SHOW") { printCalibration(); return; }
+    if (what == "HELP" || what == "") { printCalibrationHelp(); return false; }
+    if (what == "SHOW") { printCalibration(); return false; }
     if (what == "RESET")
     {
         calPrefs.begin("shellsafe-cal", false);
@@ -1386,82 +1405,151 @@ void handleCalibrationCommand(String cmd)
         Serial.println("Calibration cleared. Restarting...");
         delay(500);
         ESP.restart();
-        return;
+        return true;
     }
 
     if (what == "PH7")
     {
-        if (!sampleProbeVoltage(phProbe, v)) return;
+        if (!sampleProbeVoltage(phProbe, v)) return false;
         phVoltageAt7 = v;
         phCal7 = true;
+        calDetail = String("pH 7.00 point saved at ") + String(v, 3) + " V." +
+                    (phCal2 ? "" : " Next: rinse the probe and calibrate in the pH 4.00 or 10.00 buffer.");
     }
     else if (what == "PH4" || what == "PH10")
     {
-        if (!sampleProbeVoltage(phProbe, v)) return;
+        if (!sampleProbeVoltage(phProbe, v)) return false;
         if (phCal7 && fabs(v - phVoltageAt7) < 0.02f)
         {
-            Serial.println("CAL FAILED: same voltage as pH 7 buffer. Is the probe really in the second buffer?");
-            return;
+            calSay("CAL FAILED: same voltage as the pH 7 buffer. Is the probe really in the second buffer?");
+            return false;
         }
         phVoltageAt2 = v;
         phAt2 = what == "PH4" ? 4.0f : 10.0f;
         phCal2 = true;
+        calDetail = String("pH ") + String(phAt2, 2) + " point saved at " + String(v, 3) + " V." +
+                    (phCal7 ? " pH is calibrated." : " Next: calibrate in the pH 7.00 buffer.");
     }
     else if (what == "TURB0")
     {
-        if (!sampleProbeVoltage(turbidityProbe, v)) return;
+        if (!sampleProbeVoltage(turbidityProbe, v)) return false;
         turbidityClearVoltage = v;
         turbidityVoltsPerNtu = (v * 0.12f) / 1000.0f;   // keep the default ratio until a standard is used
         turbidityCalibrated = true;
+        calDetail = String("Clean water set as 0 NTU at ") + String(v, 3) + " V.";
     }
     else if (what == "TURB")
     {
-        if (!turbidityCalibrated) { Serial.println("CAL FAILED: run CAL TURB0 in clean water first."); return; }
-        if (value <= 0.0f) { Serial.println("Usage: CAL TURB <ntu of the standard>"); return; }
-        if (!sampleProbeVoltage(turbidityProbe, v)) return;
+        if (!turbidityCalibrated) { calSay("CAL FAILED: set the clean-water zero (TURB0) first."); return false; }
+        if (value <= 0.0f) { calSay("Usage: CAL TURB <ntu of the standard>"); return false; }
+        if (!sampleProbeVoltage(turbidityProbe, v)) return false;
         float drop = turbidityClearVoltage - v;
-        if (drop < 0.01f) { Serial.println("CAL FAILED: no voltage drop versus clean water."); return; }
+        if (drop < 0.01f) { calSay("CAL FAILED: no voltage drop versus clean water. Is the probe in the standard?"); return false; }
         turbidityVoltsPerNtu = drop / value;
+        calDetail = String("Turbidity scale set from the ") + String(value, 0) + " NTU standard (" + String(v, 3) + " V).";
     }
     else if (what == "ORP")
     {
-        if (arg.length() == 0) { Serial.println("Usage: CAL ORP <mV of the reference solution>"); return; }
-        if (!sampleProbeVoltage(orpProbe, v)) return;
+        if (arg.length() == 0) { calSay("Usage: CAL ORP <mV of the reference solution>"); return false; }
+        if (!sampleProbeVoltage(orpProbe, v)) return false;
         orpCalibrationOffset = value - v * 1000.0f;
         orpCalibrated = true;
+        calDetail = String("ORP set to ") + String(value, 0) + " mV (offset " + String(orpCalibrationOffset, 1) + " mV).";
     }
     else if (what == "EC0")
     {
-        if (!sampleRawVoltage(EC_SENSOR_PIN, v)) return;
+        if (!sampleRawVoltage(EC_SENSOR_PIN, v)) return false;
         ecZeroVoltage = v;
         Serial.printf("EC dry zero set to %.3f V.\n", v);
-        if (ecCalibrated)
-            Serial.println("Now put the probe back in the standard and run CAL EC <uS/cm> again.");
+        calDetail = String("EC dry zero set to ") + String(v, 3) + " V." +
+                    (ecCalibrated ? " Now calibrate again in the conductivity standard." : "");
     }
     else if (what == "EC")
     {
-        if (value <= 0.0f) { Serial.println("Usage: CAL EC <uS/cm of the standard>, e.g. CAL EC 1413"); return; }
-        if (!sampleProbeVoltage(ecProbe, v)) return;
+        if (value <= 0.0f) { calSay("Usage: CAL EC <uS/cm of the standard>, e.g. CAL EC 12880"); return false; }
+        if (!sampleProbeVoltage(ecProbe, v)) return false;
         float raw = ecFromVoltage(v);
-        if (raw <= 0.0f) { Serial.println("CAL FAILED: EC reading is zero."); return; }
+        if (raw <= 0.0f) { calSay("CAL FAILED: EC reading is zero. Is the probe in the standard?"); return false; }
         ecCalibrationK = value / raw;
         ecCalibrated = true;
+        calDetail = String("EC set to ") + String(value, 0) + " uS/cm (K " + String(ecCalibrationK, 3) + ").";
     }
     else if (what == "TEMP")
     {
-        if (arg.length() == 0 || !tempSensorFound) { Serial.println("CAL FAILED: needs CAL TEMP <C> and a detected DS18B20."); return; }
+        if (arg.length() == 0 || !tempSensorFound) { calSay("CAL FAILED: needs a reference temperature and a detected DS18B20."); return false; }
         float raw = readTemperatureC() - tempOffsetC;
         tempOffsetC = value - raw;
+        calDetail = String("Temperature offset set to ") + String(tempOffsetC, 2) + " C.";
     }
     else
     {
         printCalibrationHelp();
-        return;
+        calDetail = "Unknown calibration step: " + what;
+        return false;
     }
 
     saveCalibration();
     Serial.print("Saved. ");
     printCalibration();
+    Serial.println(calDetail);
+    return true;
+}
+
+// ============================================================
+// REMOTE CALIBRATION (/cal_command)
+// ============================================================
+bool firebaseHttpPatch(const char* path, const String& body)
+{
+    if (WiFi.status() != WL_CONNECTED) return false;
+    HTTPClient http;
+    http.setTimeout(10000);
+    http.begin(firebaseUrl(path));
+    http.addHeader("Content-Type", "application/json");
+    int code = http.sendRequest("PATCH", body);
+    http.end();
+    return code >= 200 && code < 300;
+}
+
+void reportCalibration(const char* status, const String& detail)
+{
+    StaticJsonDocument<512> doc;
+    doc["status"] = status;
+    doc["detail"] = detail;
+    JsonObject ts = doc.createNestedObject(strcmp(status, "running") == 0 ? "started_at" : "completed_at");
+    ts[".sv"] = "timestamp";
+    String body;
+    serializeJson(doc, body);
+    if (!firebaseHttpPatch(firebaseCalPath, body))
+        Serial.println("Failed to write /cal_command status.");
+}
+
+void pollCalibrationCommand()
+{
+    if (WiFi.status() != WL_CONNECTED) return;
+    String body;
+    if (!firebaseHttpGet(firebaseCalPath, body)) return;
+    StaticJsonDocument<512> doc;
+    if (deserializeJson(doc, body)) return;
+    if (String(doc["status"] | "") != "pending") return;
+    String id = doc["id"] | "";
+    String command = doc["command"] | "";
+    if (!id.length() || !command.length() || id == lastCalCommandId) return;
+    lastCalCommandId = id;
+
+    command.trim();
+    command.toUpperCase();
+    Serial.println("Web calibration step: " + command);
+    if (command == "RESET")
+    {
+        // The board restarts inside the handler, so report first.
+        reportCalibration("done", "All calibration cleared. The device is restarting.");
+        handleCalibrationCommand(command);
+        return;
+    }
+    reportCalibration("running", "Measuring. Keep the probe still in the solution.");
+    bool ok = handleCalibrationCommand(command);
+    reportCalibration(ok ? "done" : "failed",
+                      calDetail.length() ? calDetail : String(ok ? "Saved." : "Calibration failed."));
 }
 
 // ============================================================
@@ -1670,7 +1758,7 @@ void sendDataToFirebase()
         millis() - lastCellularPublish < cellularPublishInterval)
         return;
 
-    StaticJsonDocument<2048> jsonDoc;
+    StaticJsonDocument<3072> jsonDoc;
 
     if (tempSensorFound)
         jsonDoc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
@@ -1710,6 +1798,18 @@ void sendDataToFirebase()
     cal["turbidity"] = turbidityCalibrated;
     cal["orp"] = orpCalibrated;
     cal["ec"] = ecCalibrated;
+    // Saved calibration points, shown on the web Calibration page.
+    JsonObject calInfo = jsonDoc.createNestedObject("cal_info");
+    calInfo["ph7_set"] = phCal7;
+    calInfo["ph2_set"] = phCal2;
+    calInfo["ph_v7"] = roundf(phVoltageAt7 * 1000.0f) / 1000.0f;
+    calInfo["ph_v2"] = roundf(phVoltageAt2 * 1000.0f) / 1000.0f;
+    calInfo["ph_p2"] = phAt2;
+    calInfo["turb_v0"] = roundf(turbidityClearVoltage * 1000.0f) / 1000.0f;
+    calInfo["orp_off"] = roundf(orpCalibrationOffset * 10.0f) / 10.0f;
+    calInfo["ec_k"] = roundf(ecCalibrationK * 10000.0f) / 10000.0f;
+    calInfo["ec_v0"] = roundf(ecZeroVoltage * 1000.0f) / 1000.0f;
+    calInfo["t_off"] = roundf(tempOffsetC * 100.0f) / 100.0f;
 
     jsonDoc["a7670_initialized"] = modemInitialized;
     jsonDoc["a7670_model"] = modemName;
@@ -2136,7 +2236,7 @@ void setup()
     Serial.println("#          SHELLSAFE SYSTEM            #");
     Serial.println("#                                      #");
     Serial.println("# ESP32-WROVER-E T-CALL A7670 V1.0    #");
-    Serial.println("# Firmware: v5 (LTE backup, battery)   #");
+    Serial.println("# Firmware: v5.1 (web calibration)     #");
     Serial.println("#                                      #");
     Serial.println("# A7670 = SMS + GPS + LTE backup       #");
     Serial.println("# WiFi  = Firebase (primary)           #");
@@ -2242,6 +2342,12 @@ void loop()
             lastHistoryPush = now;
             pushReadingLog();
         }
+    }
+
+    if (now - lastCalPoll >= calPollInterval)
+    {
+        lastCalPoll = now;
+        pollCalibrationCommand();
     }
 
     if (now - lastBatteryRead >= batteryReadInterval)

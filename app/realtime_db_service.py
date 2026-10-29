@@ -14,6 +14,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from typing import Deque, Dict, List, Optional, Tuple
 
 from firebase_admin import db
@@ -320,6 +321,8 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         'ds18b20_count': raw.get('ds18b20_count'),
         # Per-probe calibration flags from firmware; missing means unknown (older firmware).
         'calibrated': raw.get('calibrated') if isinstance(raw.get('calibrated'), dict) else {},
+        # Saved calibration points (firmware v5+), for the Calibration page.
+        'cal_info': raw.get('cal_info') if isinstance(raw.get('cal_info'), dict) else {},
         'uptime_seconds': raw.get('uptime_seconds'),
         # Power and performance (firmware v5+); None on older firmware.
         'battery_pct': _to_float(raw.get('battery_pct')),
@@ -694,6 +697,98 @@ def request_sms_test(requested_by: str = 'admin') -> Dict:
     }
     db.reference(SMS_TEST_PATH).set(payload)
     return payload
+
+
+CAL_COMMAND_PATH = '/cal_command'
+
+# Calibration steps the web page may send, with the allowed range of the
+# reference value for steps that take one. Same commands as serial CAL.
+CAL_STEPS = {
+    'PH7': None,
+    'PH4': None,
+    'PH10': None,
+    'TURB0': None,
+    'TURB': (0.1, 4000.0),
+    'ORP': (-2000.0, 2000.0),
+    'EC0': None,
+    'EC': (1.0, 200000.0),
+    'TEMP': (-10.0, 60.0),
+    'RESET': None,
+}
+CAL_PENDING_TIMEOUT_SECONDS = 60
+CAL_RUNNING_TIMEOUT_SECONDS = 60
+
+
+def get_calibration_status() -> Dict:
+    """Last calibration step queued for the device and its result."""
+    initialize_firebase()
+    try:
+        data = db.reference(CAL_COMMAND_PATH).get()
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return {'id': None, 'command': None, 'status': 'idle', 'detail': '', 'stale': False}
+
+    status = str(data.get('status') or 'idle').lower()
+    if status not in ('idle', 'pending', 'running', 'done', 'failed'):
+        status = 'idle'
+
+    # A step nobody picked up (device offline) or that never finished must
+    # not lock the page forever.
+    stale = False
+    queued_ms = data.get('requested_at_ms')
+    started = data.get('started_at')
+    now = time.time()
+    if status == 'pending' and isinstance(queued_ms, (int, float)):
+        stale = now - queued_ms / 1000.0 > CAL_PENDING_TIMEOUT_SECONDS
+    elif status == 'running' and isinstance(started, (int, float)):
+        stale = now - started / 1000.0 > CAL_RUNNING_TIMEOUT_SECONDS
+
+    return {
+        'id': data.get('id'),
+        'command': data.get('command'),
+        'status': status,
+        'detail': str(data.get('detail') or ''),
+        'requested_at': data.get('requested_at'),
+        'requested_by': data.get('requested_by'),
+        'stale': stale,
+    }
+
+
+def request_calibration(step: str, value=None, requested_by: str = 'admin') -> Dict:
+    """Queue one calibration step for the device; it polls /cal_command every ~5 s."""
+    step = (step or '').strip().upper()
+    if step not in CAL_STEPS:
+        raise ValueError('Unknown calibration step.')
+
+    command = step
+    bounds = CAL_STEPS[step]
+    if bounds:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError('Enter the reference value of the solution.')
+        low, high = bounds
+        if not low <= number <= high:
+            raise ValueError(f'The reference value must be between {low:g} and {high:g}.')
+        command = f'{step} {number:g}'
+
+    current = get_calibration_status()
+    if current['status'] in ('pending', 'running') and not current['stale']:
+        raise ValueError('Another calibration step is still running. Wait for it to finish.')
+
+    initialize_firebase()
+    payload = {
+        'id': uuid.uuid4().hex[:12],
+        'command': command,
+        'status': 'pending',
+        'detail': 'Waiting for the device to pick up this step…',
+        'requested_at': datetime.utcnow().isoformat() + 'Z',
+        'requested_at_ms': int(time.time() * 1000),
+        'requested_by': requested_by or 'admin',
+    }
+    db.reference(CAL_COMMAND_PATH).set(payload)
+    return get_calibration_status()
 
 
 _realtime_db_service = None

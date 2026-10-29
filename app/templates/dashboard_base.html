@@ -14,6 +14,7 @@
     <li><a href="{{ url_for('main.reports') }}" {% if request.endpoint in ('main.reports', 'main.deleted_reports_view') %}aria-current="page"{% endif %}><i class="bi bi-file-earmark-text" aria-hidden="true"></i><span>Reports</span></a></li>
     <li class="nav-label">Settings</li>
     <li><a href="{{ url_for('main.sms_settings') }}" {% if request.endpoint == 'main.sms_settings' %}aria-current="page"{% endif %}><i class="bi bi-chat-left-text" aria-hidden="true"></i><span>SMS recipients</span></a></li>
+    <li><a href="{{ url_for('main.calibration_settings') }}" {% if request.endpoint == 'main.calibration_settings' %}aria-current="page"{% endif %}><i class="bi bi-rulers" aria-hidden="true"></i><span>Calibration</span></a></li>
     <li><a href="{{ url_for('main.threshold_settings') }}" {% if request.endpoint == 'main.threshold_settings' %}aria-current="page"{% endif %}><i class="bi bi-sliders" aria-hidden="true"></i><span>Thresholds</span></a></li>
     {% endif %}
 </ul>

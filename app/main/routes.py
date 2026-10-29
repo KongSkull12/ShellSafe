@@ -14,6 +14,8 @@ from app.realtime_db_service import (
     get_sms_test_status,
     request_sms_test,
     MAX_SMS_PHONES,
+    get_calibration_status,
+    request_calibration,
 )
 from app.sensor_view import build_live_payload, payload_fingerprint
 from app.threshold_service import (
@@ -296,6 +298,47 @@ def sms_test_send():
 def sms_test_status():
     """Poll SMS test delivery status written by firmware."""
     return jsonify({'ok': True, 'sms_test': get_sms_test_status()})
+
+
+@bp.route('/settings/calibration')
+@login_required
+@role_required('admin')
+def calibration_settings():
+    """Admin page that runs probe calibration steps on the device."""
+    live = build_live_payload()
+    return render_template(
+        'calibration.html',
+        title='Calibration',
+        live=live,
+        sensor_data=live['sensor_data'] or {},
+        calibration=get_calibration_status(),
+    )
+
+
+@bp.route('/settings/calibration/run', methods=['POST'])
+@login_required
+@role_required('admin')
+def calibration_run():
+    """Queue one calibration step for the device."""
+    body = request.get_json(silent=True) or request.form
+    try:
+        status = request_calibration(
+            body.get('step'),
+            body.get('value'),
+            requested_by=getattr(current_user, 'email', None) or 'admin',
+        )
+    except ValueError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'Could not reach Firebase: {exc}'}), 500
+    return jsonify({'ok': True, 'calibration': status})
+
+
+@bp.route('/settings/calibration/status')
+@login_required
+@role_required('admin')
+def calibration_status():
+    return jsonify({'ok': True, 'calibration': get_calibration_status()})
 
 
 @bp.route('/settings/thresholds', methods=['GET', 'POST'])

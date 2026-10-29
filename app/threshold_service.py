@@ -49,11 +49,11 @@ DEFAULT_THRESHOLDS: Dict[str, Dict[str, Any]] = {
     'orp': {
         'label': 'ORP',
         'unit': ' mV',
-        'normal_min': 250.0,
-        'normal_max': 800.0,
-        'warning_min': 200.0,
-        'warning_max': 900.0,
-        'alert_min': 150.0,
+        'normal_min': 0.0,
+        'normal_max': 1000.0,
+        'warning_min': -100.0,
+        'warning_max': 1100.0,
+        'alert_min': -200.0,
         'alert_max': None,
     },
     'ec': {
@@ -127,11 +127,40 @@ def get_thresholds(use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
     return deepcopy(result)
 
 
+_BAND_ORDER = (
+    ('alert_min', 'Alert min'),
+    ('warning_min', 'Warning min'),
+    ('normal_min', 'Normal min'),
+    ('normal_max', 'Normal max'),
+    ('warning_max', 'Warning max'),
+    ('alert_max', 'Alert max'),
+)
+
+
+def validate_bands(key: str, cfg: Dict[str, Any]) -> None:
+    """
+    Bands must nest: Alert min <= Warning min <= Normal min <= Normal max
+    <= Warning max <= Alert max (empty limits are skipped). classify_value
+    checks the alert edges first, so an Alert min above the normal range
+    would flag every normal reading as High Risk.
+    """
+    label = DEFAULT_THRESHOLDS[key]['label']
+    set_limits = [(name, cfg.get(field)) for field, name in _BAND_ORDER
+                  if cfg.get(field) is not None]
+    for (low_name, low), (high_name, high) in zip(set_limits, set_limits[1:]):
+        if low > high:
+            raise ValueError(
+                f'{label}: {low_name} ({low:g}) must not be greater than {high_name} ({high:g}). '
+                'The Normal band must sit inside the Warning band, and the Warning band inside the Alert limits.'
+            )
+
+
 def set_thresholds(sensors: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Persist threshold config and refresh cache."""
     cleaned = {}
     for key in SENSOR_ORDER:
         cleaned[key] = _merge_sensor(key, sensors.get(key) if isinstance(sensors, dict) else None)
+        validate_bands(key, cleaned[key])
 
     payload = {
         'sensors': cleaned,
