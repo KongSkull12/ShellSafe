@@ -39,8 +39,8 @@
 </div>
 {% endmacro %}
 
-{% macro run_button(step, label, input_id=None, quiet=False) %}
-<button type="button" class="btn {{ 'btn-quiet' if quiet else 'btn-primary' }}" data-cal-step="{{ step }}" {% if input_id %}data-cal-input="{{ input_id }}"{% endif %}>{{ label }}</button>
+{% macro run_button(step, label, input_id=None, quiet=False, value=None) %}
+<button type="button" class="btn {{ 'btn-quiet' if quiet else 'btn-primary' }}" data-cal-step="{{ step }}" {% if input_id %}data-cal-input="{{ input_id }}"{% endif %} {% if value is not none %}data-cal-value="{{ value }}"{% endif %}>{{ label }}</button>
 {% endmacro %}
 
 {% macro probe_head(key, label, signal_label) %}
@@ -82,19 +82,13 @@
         <div class="cal-steps">
             <div class="cal-step">
                 <div>
-                    <p class="cal-step-title">1. pH 7.00 buffer</p>
-                    <p class="cal-step-text">Rinse the probe with clean water, put it in the pH 7.00 buffer and wait 1–2 minutes.</p>
-                </div>
-                <div class="cal-step-actions">{{ run_button('PH7', 'Calibrate pH 7.00') }}</div>
-            </div>
-            <div class="cal-step">
-                <div>
-                    <p class="cal-step-title">2. Second buffer</p>
-                    <p class="cal-step-text">Rinse again, then use the pH 4.00 buffer (or pH 10.00 if that is what you have). pH counts as calibrated after both steps.</p>
+                    <p class="cal-step-title">Calibrate with your pH buffers</p>
+                    <p class="cal-step-text">Use the pH 4.01, 6.86, and 9.18 solutions you have. Rinse the probe between solutions and wait 1–2 minutes for each reading to settle. At least two buffers are required; all three provide the most accurate calibration.</p>
                 </div>
                 <div class="cal-step-actions">
-                    {{ run_button('PH4', 'Calibrate pH 4.00') }}
-                    {{ run_button('PH10', 'pH 10.00', quiet=True) }}
+                    {{ run_button('PH', 'Calibrate pH 4.01', value='4.01') }}
+                    {{ run_button('PH', 'Calibrate pH 6.86', quiet=True, value='6.86') }}
+                    {{ run_button('PH', 'Calibrate pH 9.18', quiet=True, value='9.18') }}
                 </div>
             </div>
         </div>
@@ -131,7 +125,7 @@
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">1. Clean water</p>
-                    <p class="cal-step-text">Put the probe in clear water so the gap between the prongs is filled. This sets 0 NTU.</p>
+                    <p class="cal-step-text">Put the probe in clear water so the gap between the prongs is filled. This sets 0 NTU. To suppress false readings when the turbidity probe is dry, keep the EC probe installed at the same depth; the turbidity probe alone cannot detect whether it is in air or water.</p>
                 </div>
                 <div class="cal-step-actions">{{ run_button('TURB0', 'Set 0 NTU') }}</div>
             </div>
@@ -201,7 +195,7 @@
 (function () {
     const RUN_URL = {{ url_for('main.calibration_run')|tojson }};
     const STATUS_URL = {{ url_for('main.calibration_status')|tojson }};
-    const PROBE_OF = { PH7: 'ph', PH4: 'ph', PH10: 'ph', EC0: 'ec', EC: 'ec', TURB0: 'turbidity', TURB: 'turbidity', ORP: 'orp', TEMP: 'temperature', RESET: 'reset' };
+    const PROBE_OF = { PH: 'ph', PH7: 'ph', PH4: 'ph', PH10: 'ph', EC0: 'ec', EC: 'ec', TURB0: 'turbidity', TURB: 'turbidity', ORP: 'orp', TEMP: 'temperature', RESET: 'reset' };
     const ICONS = { pending: 'bi-hourglass-split', running: 'bi-hourglass-split', done: 'bi-check-circle-fill', failed: 'bi-x-circle-fill' };
     const buttons = Array.from(document.querySelectorAll('[data-cal-step]'));
     let deviceLive = {{ 'true' if live.link.state == 'live' else 'false' }};
@@ -259,7 +253,7 @@
     async function run(button) {
         const step = button.dataset.calStep;
         const probe = PROBE_OF[step];
-        let value = null;
+        let value = button.dataset.calValue || null;
         if (button.dataset.calInput) {
             const input = document.getElementById(button.dataset.calInput);
             value = input.value.trim();
@@ -332,8 +326,9 @@
         setText('[data-cal-signal="temperature"]', d.ds18b20_count == null ? '—' : `${d.ds18b20_count} found`);
 
         const known = Object.keys(info).length > 0;
+        const phPoints = Array.isArray(info.ph_points) ? info.ph_points : [];
         if (cal.ph) setTag('ph', 'Calibrated', 'ok');
-        else if (info.ph7_set || info.ph2_set) setTag('ph', 'Half done', 'warning');
+        else if (phPoints.length || info.ph7_set || info.ph2_set) setTag('ph', 'Half done', 'warning');
         else setTag('ph', 'Not calibrated', 'warning');
         setTag('ec', cal.ec ? 'Calibrated' : 'Not calibrated', cal.ec ? 'ok' : 'warning');
         setTag('turbidity', cal.turbidity ? 'Calibrated' : 'Not calibrated', cal.turbidity ? 'ok' : 'warning');
@@ -346,9 +341,12 @@
             });
             return;
         }
-        const ph = [];
-        if (info.ph7_set) ph.push(`pH 7.00 at ${fmt(info.ph_v7, 3)} V`);
-        if (info.ph2_set) ph.push(`pH ${fmt(info.ph_p2, 2)} at ${fmt(info.ph_v2, 3)} V`);
+        const ph = phPoints.length
+            ? phPoints.map(function (point) { return `pH ${fmt(point.ph, 2)} at ${fmt(point.v, 3)} V`; })
+            : [
+                info.ph7_set ? `pH 7.00 at ${fmt(info.ph_v7, 3)} V` : null,
+                info.ph2_set ? `pH ${fmt(info.ph_p2, 2)} at ${fmt(info.ph_v2, 3)} V` : null,
+            ].filter(Boolean);
         setText('[data-cal-saved="ph"]', ph.length ? 'Saved: ' + ph.join(' · ') : 'No buffer points saved yet.');
         setText('[data-cal-saved="ec"]', cal.ec ? `Saved: K ${fmt(info.ec_k, 3)} · dry zero ${fmt(info.ec_v0, 3)} V` : `Dry zero ${fmt(info.ec_v0, 3)} V · no standard saved yet.`);
         setText('[data-cal-saved="turbidity"]', cal.turbidity ? `Saved: clean water at ${fmt(info.turb_v0, 3)} V` : 'No clean-water point saved yet.');

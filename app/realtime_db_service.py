@@ -241,8 +241,15 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
     """Map RTDB field names from shellsafev2.ino to template/API format."""
     temperature, temperature_connected = _parse_sensor_value(raw.get('temperature'))
     ph, ph_connected = _parse_sensor_value(raw.get('pH', raw.get('ph')))
-    turbidity, turbidity_connected = _parse_sensor_value(
-        raw.get('turbidity_NTU', raw.get('turbidity'))
+    raw_turbidity = raw.get('turbidity_NTU', raw.get('turbidity'))
+    turbidity, turbidity_connected = _parse_sensor_value(raw_turbidity)
+    turbidity_dry = raw.get('turbidity_dry')
+    turbidity_out_of_water = turbidity_dry is True or (
+        isinstance(turbidity_dry, str)
+        and turbidity_dry.strip().lower() in {'true', '1', 'yes'}
+    ) or (
+        isinstance(raw_turbidity, str)
+        and raw_turbidity.strip().lower() == 'out of water'
     )
     orp, orp_connected = _parse_sensor_value(raw.get('ORP_mV', raw.get('orp')))
     ec, ec_connected = _parse_sensor_value(raw.get('EC_uS_cm', raw.get('ec')))
@@ -297,6 +304,7 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         'temperature': temperature,
         'ph': ph,
         'turbidity': turbidity,
+        'turbidity_out_of_water': turbidity_out_of_water,
         'orp': orp,
         'ec': ec,
         'temperature_connected': temperature_connected,
@@ -412,7 +420,11 @@ def get_sensor_statuses(reading: Optional[Dict]) -> List[Dict]:
         connected = bool(reading.get(flag, value is not None))
         active = _sensor_is_active(value, key, connected)
 
-        if active:
+        if key == 'turbidity' and reading.get('turbidity_out_of_water'):
+            status_label = 'Out of water'
+            status_class = 'warning'
+            display = 'Out of water'
+        elif active:
             status_label = 'Active'
             status_class = 'success'
             display = _format_sensor_reading(key, value, unit)
@@ -704,6 +716,7 @@ CAL_COMMAND_PATH = '/cal_command'
 # Calibration steps the web page may send, with the allowed range of the
 # reference value for steps that take one. Same commands as serial CAL.
 CAL_STEPS = {
+    'PH': (1.0, 13.0),
     'PH7': None,
     'PH4': None,
     'PH10': None,

@@ -28,6 +28,7 @@ SENSORS = (
 STATE_LABELS = {
     'live': 'Live',
     'unplugged': 'Probe unplugged',
+    'out_of_water': 'Out of water',
     'offline': 'Device offline',
     'checking': 'Connecting',
     'nodata': 'No data',
@@ -51,6 +52,8 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
 
         if link_state == 'live':
             state = 'live' if connected and value is not None else 'unplugged'
+            if key == 'turbidity' and (reading or {}).get('turbidity_out_of_water'):
+                state = 'out_of_water'
         else:
             state = link_state
 
