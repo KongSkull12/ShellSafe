@@ -101,14 +101,20 @@ unsigned long lastHistoryPush = 0;
 
 // ============================================================
 // BATTERY
-// The A7670 is powered straight from the LiPo, so AT+CBC reports the
-// battery voltage with no extra wiring. On USB with no battery it reads the
-// charger output (about 4.2 V, shown as 100%). If you wire a divider from
-// the battery to a free ADC1 pin (GPIO33 or GPIO36), set the pin here and
-// that reading is used instead.
+// 12 V 3S lithium pack (3 x 18650), stepped down to 5 V by an LM2596.
+// The pack voltage is read BEFORE the buck converter through a divider:
+//   battery + --- 100k ---+--- 22k --- GND
+//                         +--- GPIO33
+// 12.6 V full charge gives 2.27 V at the pin (ADC limit about 3.1 V).
+// Set BATTERY_ADC_PIN to -1 to fall back to the modem's AT+CBC instead.
 // ============================================================
-#define BATTERY_ADC_PIN        -1
-const float BATTERY_DIVIDER_RATIO = 2.0f;   // 100k / 100k divider
+#define BATTERY_ADC_PIN        33
+const float BATTERY_DIVIDER_RATIO = (100.0f + 22.0f) / 22.0f;   // 5.545
+// Adjust if the reading differs from a multimeter on the battery terminals:
+// new value = current value * (multimeter volts / reported volts).
+const float BATTERY_CAL_FACTOR = 1.00f;
+// 3S pack on the divider; the modem fallback reads a single cell.
+const int BATTERY_CELLS = (BATTERY_ADC_PIN >= 0) ? 3 : 1;
 const unsigned long batteryReadInterval = 30000UL;
 unsigned long lastBatteryRead = 0;
 float batteryVoltage = 0.0f;
@@ -1922,9 +1928,11 @@ bool firebaseSend(const char* path, const String& body, bool replace)
 // BATTERY
 // ============================================================
 
-// Single-cell LiPo voltage to charge, interpolated between these points.
-int batteryPercentFromVoltage(float v)
+// Lithium (18650 / LiPo) per-cell voltage to charge, interpolated between
+// these points. The pack voltage is divided by BATTERY_CELLS first.
+int batteryPercentFromVoltage(float packVolts)
 {
+    float v = packVolts / BATTERY_CELLS;
     static const float volts[] = {3.30f, 3.50f, 3.60f, 3.70f, 3.75f, 3.80f, 3.85f, 3.90f, 4.00f, 4.10f, 4.20f};
     static const int pct[]     = {0,     5,     10,    20,    30,    40,    50,    60,    75,    90,    100};
     const int n = sizeof(pct) / sizeof(pct[0]);
@@ -1942,7 +1950,16 @@ void readBattery()
 {
     float v = 0.0f;
 #if BATTERY_ADC_PIN >= 0
-    v = rawToVoltage(readAdcAverage(BATTERY_ADC_PIN)) * BATTERY_DIVIDER_RATIO;
+    // analogReadMilliVolts uses the chip's factory ADC calibration, which is
+    // far closer than raw * 3.3 / 4095 at these voltages.
+    uint32_t totalMv = 0;
+    const int samples = 32;
+    for (int i = 0; i < samples; i++)
+    {
+        totalMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+        delayMicroseconds(200);
+    }
+    v = (totalMv / (float)samples) / 1000.0f * BATTERY_DIVIDER_RATIO * BATTERY_CAL_FACTOR;
     batterySource = "adc";
 #else
     if (!modemInitialized) return;
@@ -1958,7 +1975,10 @@ void readBattery()
     if (v > 100.0f) v /= 1000.0f;   // some firmware reports millivolts
     batterySource = "modem";
 #endif
-    if (v < 2.5f || v > 5.0f)
+    // Outside a believable range per cell means nothing is wired (or the
+    // modem has no battery reading): report unknown rather than a fake 0%.
+    float perCell = v / BATTERY_CELLS;
+    if (perCell < 2.5f || perCell > 4.4f)
     {
         batteryPercent = -1;
         return;

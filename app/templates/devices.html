@@ -70,7 +70,7 @@
     <div class="panel-head">
         <div>
             <h2 id="powerTitle">Power and performance</h2>
-            <p>Battery is read from the modem's supply voltage; on USB with no battery it shows the charger's 4.2 V as 100%. Needs firmware v5.</p>
+            <p>Battery is the 12 V pack's voltage, measured before the 5 V converter. Needs firmware v5.</p>
         </div>
         <span class="tag {{ 'tag-high' if d.get('battery_pct') is not none and d.get('battery_pct') < 20 else ('tag-ok' if d.get('battery_pct') is not none else '') }}" id="batteryChip">{% if d.get('battery_pct') is not none %}Battery {{ d.get('battery_pct')|int }}%{% else %}Battery unknown{% endif %}</span>
     </div>
