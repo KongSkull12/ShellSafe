@@ -35,13 +35,33 @@
     <span class="risk-icon" aria-hidden="true"><i class="bi bi-diagram-3"></i></span>
     <div class="risk-text">
         <p class="risk-title">ML prediction: <span data-prediction-title>{{ m.title if m.has_prediction else ('Not trained' if not m.available else 'Unavailable') }}</span></p>
-        <p class="risk-msg" data-prediction-msg>{{ m.message }}{% if m.demo %} Demo model, not validated.{% endif %}</p>
+        <p class="risk-msg" data-prediction-msg>{{ m.message }}{% if m.demo %} Demo model, not validated.{% endif %}{% if m.proxy %} Trained on a stand-in dataset, not this station.{% endif %}</p>
     </div>
     <div class="risk-score" data-prediction-score-wrap {% if m.probability is not defined or m.probability is none %}hidden{% endif %}>
         <strong data-prediction-score>{{ '%.0f'|format(m.probability * 100) if m.probability is defined and m.probability is not none else '' }}</strong>
         <span>% bloom</span>
     </div>
 </section>
+{% endmacro %}
+
+{% macro extra_metrics(items) %}
+{% if items %}
+<section class="metrics metrics-extra" aria-label="Salinity">
+    {% for s in items %}
+    <div class="metric" data-plate="{{ s.key }}" data-state="{{ s.state }}" data-level="{{ s.level or '' }}">
+        <span class="metric-label">{{ s.label }}</span>
+        <span class="metric-value">
+            <span class="num t-digit-group" data-plate-num>{{ s.display if s.state == 'live' else '—' }}</span>
+            <span class="unit" data-plate-unit {% if s.state != 'live' or not s.display_unit %}hidden{% endif %}>{{ s.display_unit }}</span>
+        </span>
+        <span class="metric-foot">
+            <span class="state" data-plate-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ state_text(s) }}</span>
+        </span>
+        {% if s.note %}<p class="metric-note" data-plate-note>{{ s.note }}</p>{% endif %}
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
 {% endmacro %}
 
 {% macro metrics(live) %}

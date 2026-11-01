@@ -43,7 +43,7 @@
                 <tr data-search="{{ (report.report_name ~ ' ' ~ (report.generated_by or ''))|lower }}" data-type="{{ (report.report_type or '')|lower }}">
                     <td class="strong">{{ report.report_name }}</td>
                     <td><span class="tag">{{ report.report_type }}</span></td>
-                    <td class="muted">{{ report.generated_date.strftime('%b %d, %Y · %I:%M %p') if report.generated_date else '—' }}</td>
+                    <td class="muted">{{ report.generated_date|localtime if report.generated_date else '—' }}</td>
                     <td class="muted">{{ report.file_size or '—' }}</td>
                     <td class="muted">{{ report.generated_by or '—' }}</td>
                     <td class="num">

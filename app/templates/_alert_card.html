@@ -10,7 +10,7 @@
         </h3>
         <p class="alert-msg">{{ alert.alert_message }}</p>
         <p class="alert-meta">
-            <span><i class="bi bi-clock" aria-hidden="true"></i> {{ alert.created_at.strftime('%b %d, %Y · %I:%M %p') }}</span>
+            <span><i class="bi bi-clock" aria-hidden="true"></i> {{ alert.created_at|localtime }}</span>
             <span>{{ type_names.get(alert.alert_type, alert.alert_type|replace('_', ' ')|title) }}</span>
             <span>{{ alert.alert_level }}</span>
         </p>

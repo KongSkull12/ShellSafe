@@ -114,6 +114,7 @@ def predict_bloom(reading: Optional[Dict]) -> Dict:
         'has_prediction': False,
         'model_name': model.get('name'),
         'demo': bool(model.get('demo')),
+        'proxy': bool(model.get('proxy')),
         'test_f1': model.get('test_f1'),
     }
 

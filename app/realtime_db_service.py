@@ -19,6 +19,7 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 from firebase_admin import db
 
+from app.salinity import salinity_psu
 from firebase_config import initialize_firebase
 
 DEVICE_DATA_PATHS = (
@@ -30,9 +31,10 @@ SMS_CONFIG_PATH = '/sms_config'
 SMS_TEST_PATH = '/sms_test'
 MAX_SMS_PHONES = 4
 
-# Firmware publishes every ~5 s, but a PUT can stall behind modem/SMS work,
-# so allow a few missed publishes before calling the device offline.
-DEVICE_OFFLINE_TIMEOUT_SECONDS = int(os.environ.get('DEVICE_OFFLINE_TIMEOUT_SECONDS', '30'))
+# A publish is due about every 5 s on Wi-Fi, but GPS, TLS and SMS can stall
+# the loop for much longer while the radio stays associated. Wait through
+# several of those stalls before calling the node offline.
+DEVICE_OFFLINE_TIMEOUT_SECONDS = int(os.environ.get('DEVICE_OFFLINE_TIMEOUT_SECONDS', '90'))
 
 # Short in-memory cache so SSE/poll do not hammer Firebase every tick.
 _latest_cache: Dict[str, object] = {'data': None, 'expires': 0.0}
@@ -52,6 +54,7 @@ UPTIME_TIMESTAMP_MAX = 1_000_000_000
 
 DISCONNECTED_TOKENS = frozenset({
     'disconnected', 'offline', 'n/a', 'na', 'none', 'null', '',
+    'not installed', 'reserved', 'unavailable',
 })
 
 SENSOR_SPECS = (
@@ -140,7 +143,7 @@ def _offline_timeout(raw: Dict) -> int:
         interval = float(raw.get('publish_interval_s') or 0)
     except (TypeError, ValueError):
         interval = 0
-    return max(DEVICE_OFFLINE_TIMEOUT_SECONDS, int(interval * 2.5))
+    return max(DEVICE_OFFLINE_TIMEOUT_SECONDS, int(interval * 4))
 
 
 def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[str, Optional[float]]:
@@ -163,6 +166,10 @@ def _assess_link(device_id: str, raw: Dict, has_sensor_payload: bool) -> Tuple[s
     if isinstance(server_ts, (int, float)) and server_ts > 1e12:
         seen = server_ts / 1000.0
         age = now - seen
+        # A negative age means this computer's clock is behind Firebase.
+        # The publish is current; do not call the node offline for that.
+        if age < 0:
+            age = 0
         return ('live' if age <= timeout else 'offline'), seen
 
     wall_seen = _wall_clock_epoch(_reading_timestamp(raw))
@@ -253,6 +260,21 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
     )
     orp, orp_connected = _parse_sensor_value(raw.get('ORP_mV', raw.get('orp')))
     ec, ec_connected = _parse_sensor_value(raw.get('EC_uS_cm', raw.get('ec')))
+    ec_dry = raw.get('ec_dry') is True or (
+        isinstance(raw.get('ec_dry'), str) and raw.get('ec_dry').strip().lower() in {'true', '1', 'yes'}
+    )
+    salinity, salinity_reported = _parse_sensor_value(
+        raw.get('salinity_ppt', raw.get('salinity_PSU', raw.get('salinity')))
+    )
+    dissolved_oxygen, do_connected = _parse_sensor_value(raw.get('DO_mgL', raw.get('do')))
+    ammonia, nh3_connected = _parse_sensor_value(raw.get('NH3_mgL', raw.get('nh3')))
+    do_installed = bool(raw.get('do_installed')) and do_connected if 'do_installed' in raw else do_connected
+    nh3_installed = bool(raw.get('nh3_installed')) and nh3_connected if 'nh3_installed' in raw else nh3_connected
+    calibrated_raw = raw.get('calibrated') if isinstance(raw.get('calibrated'), dict) else {}
+    # Older firmware publishes EC and temperature but not salinity. Same formula.
+    if not salinity_reported and ec_connected and temperature_connected and not ec_dry:
+        if calibrated_raw.get('ec') is not False and calibrated_raw.get('temperature') is not False:
+            salinity = salinity_psu(ec, temperature)
 
     # Payload exists when firmware wrote any of the five sensor keys (even Disconnected).
     sensor_keys_present = any(
@@ -307,6 +329,15 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         'turbidity_out_of_water': turbidity_out_of_water,
         'orp': orp,
         'ec': ec,
+        'ec_dry': ec_dry,
+        'salinity': salinity,
+        'salinity_reported': salinity_reported,
+        'dissolved_oxygen': dissolved_oxygen if do_installed else None,
+        'do_installed': do_installed,
+        'do_connected': do_connected and do_installed,
+        'ammonia': ammonia if nh3_installed else None,
+        'nh3_installed': nh3_installed,
+        'nh3_connected': nh3_connected and nh3_installed,
         'temperature_connected': temperature_connected,
         'ph_connected': ph_connected,
         'turbidity_connected': turbidity_connected,
@@ -452,6 +483,7 @@ def _record_history(reading: Dict) -> None:
         reading.get('timestamp'),
         reading.get('temperature'), reading.get('ph'), reading.get('turbidity'),
         reading.get('orp'), reading.get('ec'),
+        reading.get('salinity'),
     )
     with _history_lock:
         if key == _last_history_key['key']:
@@ -460,6 +492,11 @@ def _record_history(reading: Dict) -> None:
         sample = {'t': time.time()}
         for spec_key, _name, field, _unit, flag in SENSOR_SPECS:
             sample[spec_key] = reading.get(field) if reading.get(flag) else None
+        sample['salinity'] = reading.get('salinity')
+        if reading.get('do_installed'):
+            sample['do'] = reading.get('dissolved_oxygen')
+        if reading.get('nh3_installed'):
+            sample['nh3'] = reading.get('ammonia')
         _history.append(sample)
 
 

@@ -23,8 +23,8 @@
             <h3 class="alert-title">{{ alert.alert_title }}</h3>
             <p class="alert-msg">{{ alert.alert_message }}</p>
             <p class="alert-meta">
-                <span>Raised {{ alert.created_at.strftime('%b %d, %Y · %I:%M %p') }}</span>
-                {% if alert.deleted_at %}<span>Deleted {{ alert.deleted_at.strftime('%b %d, %Y · %I:%M %p') }}</span>{% endif %}
+                <span>Raised {{ alert.created_at|localtime }}</span>
+                {% if alert.deleted_at %}<span>Deleted {{ alert.deleted_at|localtime }}</span>{% endif %}
             </p>
         </div>
         <div class="alert-actions">

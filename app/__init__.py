@@ -27,6 +27,9 @@ def create_app(config_class=None):
             )
     
     login_manager.init_app(app)
+
+    from app.alert_helpers import format_local
+    app.add_template_filter(format_local, name='localtime')
     
     # Initialize Firebase and Firestore on app startup
     with app.app_context():

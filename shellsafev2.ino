@@ -14,7 +14,10 @@
 // ESP32-WROVER-E + LilyGO T-Call A7670 V1.0
 // Built-in A7670: GSM / SMS + GNSS / GPS
 // WiFi: Firebase RTDB (A7670 mobile data as backup)
-// Sensors: DS18B20, pH, Turbidity, ORP, EC
+// Sensors: DS18B20, pH, Turbidity, ORP, EC.
+// Salinity is calculated from EC and temperature (no extra probe).
+// DO and ammonia pins are reserved; neither probe is fitted.
+// Until a DO probe is added, ORP is the bloom-crash indicator.
 // ============================================================
 
 // ============================================================
@@ -160,6 +163,18 @@ float currentPH = 0.0f;
 float currentTurbidity = 0.0f;
 float currentORP = 0.0f;
 float currentEC = 0.0f;
+float currentSalinity = 0.0f;
+bool salinityValid = false;
+float currentDO = NAN;
+float currentNH3 = NAN;
+
+// Dissolved oxygen, then ammonia. Both stay unwired: set installed to true,
+// set the pin, and fill in the read function when the probe is attached.
+// ORP covers the bloom-crash signal until dissolved oxygen is fitted.
+const int DO_SENSOR_PIN = -1;
+const int NH3_SENSOR_PIN = -1;
+const bool doInstalled = false;
+const bool nh3Installed = false;
 
 bool phConnected = false;
 bool turbidityConnected = false;
@@ -724,7 +739,9 @@ void readGPS()
 
         modem.sendAT("+CGNSSINFO");
         String gnssResponse = "";
-        modem.waitResponse(3000L, gnssResponse);
+        // Keep this short. A long wait here delays the Firebase publish and
+        // the dashboard treats the still-associated node as offline.
+        modem.waitResponse(800L, gnssResponse);
         if (gnssResponse.length() > 0)
         {
             Serial.print("GNSS response: ");
@@ -1283,6 +1300,73 @@ float ecFromVoltage(float v)
     return ec.readEC(net * 1000.0f, tempForEC) * 1000.0f;   // DFRobot_EC returns mS/cm.
 }
 
+// DFRobot_EC compensates to 25 C at 1.85 %/C. PSS-78 wants the in-situ
+// conductivity, so that factor is removed first. Same coefficients as
+// app/salinity.py. Result is salinity in ppt.
+static const float EC_COMP_PER_C = 0.0185f;
+static const float C35_15_MS = 42.914f;
+
+float salinityHalfPowers(float rt, const float *coeff)
+{
+    float root = sqrtf(rt);
+    float power = 1.0f;
+    float sum = 0.0f;
+    for (int i = 0; i < 6; i++)
+    {
+        sum += coeff[i] * power;
+        power *= root;
+    }
+    return sum;
+}
+
+float salinityPsu(float ecUs, float tempC)
+{
+    if (!(ecUs >= 0.0f) || tempC < -2.0f || tempC > 40.0f) return NAN;
+    float insituMs = (ecUs / 1000.0f) * (1.0f + EC_COMP_PER_C * (tempC - 25.0f));
+    if (insituMs <= 0.0f) return 0.0f;
+    float ratio = insituMs / C35_15_MS;
+    float t2 = tempC * tempC;
+    float rt = 0.6766097f
+             + 2.00564e-2f * tempC
+             + 1.104259e-4f * t2
+             - 6.9698e-7f * t2 * tempC
+             + 1.0031e-9f * t2 * t2;
+    if (rt <= 0.0f) return NAN;
+    float rtRatio = ratio / rt;
+    if (rtRatio <= 0.0f) return 0.0f;
+    const float aCoeff[6] = {0.0080f, -0.1692f, 25.3851f, 14.0941f, -7.0261f, 2.7081f};
+    const float bCoeff[6] = {0.0005f, -0.0056f, -0.0066f, -0.0375f, 0.0636f, -0.0144f};
+    float delta = tempC - 15.0f;
+    float salinity = salinityHalfPowers(rtRatio, aCoeff)
+                   + (delta / (1.0f + 0.0162f * delta)) * salinityHalfPowers(rtRatio, bCoeff);
+    if (salinity < 0.0f) return 0.0f;
+    if (salinity > 50.0f) return NAN;
+    return salinity;
+}
+
+void updateSalinity()
+{
+    salinityValid = false;
+    if (!ecConnected || ecDry || !tempSensorFound || !ecCalibrated) return;
+    float salinity = salinityPsu(currentEC, currentTemperature);
+    if (isnan(salinity)) return;
+    currentSalinity = salinity;
+    salinityValid = true;
+}
+
+// Reserved probes. Return NAN until the sensor is wired to its pin.
+float readDissolvedOxygenMgL()
+{
+    if (!doInstalled || DO_SENSOR_PIN < 0) return NAN;
+    return NAN;
+}
+
+float readAmmoniaMgL()
+{
+    if (!nh3Installed || NH3_SENSOR_PIN < 0) return NAN;
+    return NAN;
+}
+
 // ============================================================
 // CALIBRATION STORAGE + SERIAL COMMANDS
 // ============================================================
@@ -1795,7 +1879,8 @@ void checkAlerts()
     if (!alertLines().length()) return;
     if (lastSmsTime && millis() - lastSmsTime < smsCooldown) return;
 
-    readGPS();
+    if (!gpsFix || millis() - lastGpsFixMs > 30000UL)
+        readGPS();
     if (!gpsFix || millis() - lastGpsFixMs > 30000UL)
     {
         Serial.println("Alert is waiting for a GPS fix before sending SMS.");
@@ -1816,7 +1901,7 @@ void sendDataToFirebase()
         millis() - lastCellularPublish < cellularPublishInterval)
         return;
 
-    StaticJsonDocument<3072> jsonDoc;
+    StaticJsonDocument<4096> jsonDoc;
 
     if (tempSensorFound)
         jsonDoc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
@@ -1845,6 +1930,21 @@ void sendDataToFirebase()
         jsonDoc["EC_uS_cm"] = roundf(currentEC * 10.0f) / 10.0f;
     else
         jsonDoc["EC_uS_cm"] = "Disconnected";
+
+    if (salinityValid)
+        jsonDoc["salinity_ppt"] = roundf(currentSalinity * 100.0f) / 100.0f;
+
+    jsonDoc["do_installed"] = doInstalled && !isnan(currentDO);
+    if (doInstalled && !isnan(currentDO))
+        jsonDoc["DO_mgL"] = roundf(currentDO * 100.0f) / 100.0f;
+    else
+        jsonDoc["DO_mgL"] = "Not installed";
+
+    jsonDoc["nh3_installed"] = nh3Installed && !isnan(currentNH3);
+    if (nh3Installed && !isnan(currentNH3))
+        jsonDoc["NH3_mgL"] = roundf(currentNH3 * 100.0f) / 100.0f;
+    else
+        jsonDoc["NH3_mgL"] = "Not installed";
 
     JsonObject probeV = jsonDoc.createNestedObject("probe_voltage");
     probeV["ph"] = roundf(phProbe.voltage * 1000.0f) / 1000.0f;
@@ -1946,7 +2046,7 @@ void pushReadingLog()
     if (!tempSensorFound && !phConnected && !turbidityConnected && !orpConnected && !ecConnected)
         return;
 
-    StaticJsonDocument<768> doc;
+    StaticJsonDocument<1024> doc;
     JsonObject ts = doc.createNestedObject("t");
     ts[".sv"] = "timestamp";
     if (tempSensorFound) doc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
@@ -1955,6 +2055,9 @@ void pushReadingLog()
     if (orpConnected) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
     // A dry probe's 0 is not a water reading; leave it out of the training log.
     if (ecConnected && !ecDry) doc["ec"] = roundf(currentEC * 10.0f) / 10.0f;
+    if (salinityValid) doc["salinity"] = roundf(currentSalinity * 100.0f) / 100.0f;
+    if (doInstalled && !isnan(currentDO)) doc["do"] = roundf(currentDO * 100.0f) / 100.0f;
+    if (nh3Installed && !isnan(currentNH3)) doc["nh3"] = roundf(currentNH3 * 100.0f) / 100.0f;
 
     JsonObject cal = doc.createNestedObject("cal");
     cal["ph"] = phCalibrated();
@@ -2189,7 +2292,10 @@ void readAllSensors()
     currentTurbidity = readTurbidity();
     currentORP = readORP();
     currentEC = readEC();
+    currentDO = readDissolvedOxygenMgL();
+    currentNH3 = readAmmoniaMgL();
     turbidityOutOfWater = turbidityConnected && ecDry;
+    updateSalinity();
 
     Serial.println();
     Serial.println("========================================");
@@ -2217,6 +2323,18 @@ void readAllSensors()
     if (ecConnected && ecDry) Serial.println("0.0 uS/cm  (probe dry / in air)");
     else if (ecConnected) { Serial.print(currentEC, 1); Serial.println(ecCalibrated ? " uS/cm" : " uS/cm  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
+
+    Serial.print("Salinity    : ");
+    if (salinityValid) { Serial.print(currentSalinity, 2); Serial.println(" ppt  (from EC + temperature)"); }
+    else Serial.println("UNAVAILABLE");
+
+    Serial.print("DO          : ");
+    if (doInstalled && !isnan(currentDO)) { Serial.print(currentDO, 2); Serial.println(" mg/L"); }
+    else Serial.println("NOT INSTALLED");
+
+    Serial.print("Ammonia     : ");
+    if (nh3Installed && !isnan(currentNH3)) { Serial.print(currentNH3, 3); Serial.println(" mg/L"); }
+    else Serial.println("NOT INSTALLED");
 
     printProbeSignals();
 
@@ -2266,6 +2384,11 @@ void connectWiFi()
     Serial.print("Connecting WiFi: ");
     Serial.println(ssid);
     WiFi.mode(WIFI_STA);
+    // Modem sleep drops the association while the CPU is in GSM/GPS work,
+    // so the router still lists the node while publishes have stopped.
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(false);
     WiFi.begin(ssid, password);
 
     int attempts = 0;
@@ -2398,9 +2521,9 @@ void loop()
     if (now - lastSensorRead >= sensorReadInterval)
     {
         lastSensorRead = now;
-        lastGpsRead = now;
 
-        readGPS();
+        // GPS has its own timer above. Reading it again here stacks a modem
+        // wait in front of every publish.
         readAllSensors();
         sendDataToFirebase();
 
@@ -2423,11 +2546,16 @@ void loop()
         readBattery();
     }
 
-    if (WiFi.status() != WL_CONNECTED && now - lastWiFiReconnect >= 30000UL)
+    // status() blips while the modem is busy. One blip must not call
+    // disconnect(), which drops a router association that is still fine.
+    if (WiFi.status() == WL_CONNECTED)
     {
         lastWiFiReconnect = now;
-        Serial.println("Attempting WiFi reconnect...");
-        WiFi.disconnect();
+    }
+    else if (now - lastWiFiReconnect >= 45000UL)
+    {
+        lastWiFiReconnect = now;
+        Serial.println("WiFi lost for 45 s. Reconnecting...");
         WiFi.begin(ssid, password);
     }
 

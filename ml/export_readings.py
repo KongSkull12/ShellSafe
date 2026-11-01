@@ -29,6 +29,7 @@ MANILA = timezone(timedelta(hours=8))
 COLUMNS = (
     ['t', 'time_local']
     + FEATURES
+    + ['salinity', 'do', 'nh3']
     + [f'cal_{k}' for k in FEATURES]
     + ['battery_pct', 'lat', 'lon', 'via']
 )
@@ -59,6 +60,9 @@ def main():
             row[key] = record.get(key)
             # The DS18B20 is factory calibrated, so temperature has no flag.
             row[f'cal_{key}'] = True if key == 'temperature' else cal.get(key)
+        row['salinity'] = record.get('salinity')
+        row['do'] = record.get('do')
+        row['nh3'] = record.get('nh3')
         rows.append(row)
 
     rows.sort(key=lambda r: r['t'])

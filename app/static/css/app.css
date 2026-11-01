@@ -341,6 +341,11 @@ code { font-family: var(--font-mono); font-size: 12px; background: var(--surface
 .state[data-state="unplugged"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
 /* Live but not calibrated: value shown, no verdict. */
 .state[data-state="live"][data-level=""]::before { background: var(--idle); }
+.state[data-state="live"][data-level="derived"]::before { background: var(--ok); }
+.state[data-state="live"][data-level="derived"] { color: var(--text-3); }
+.state[data-state="unavailable"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
+.metrics-extra { margin-top: 16px; }
+.metric-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-3); }
 .state[data-state="offline"]::before,
 .state[data-state="nodata"]::before { background: var(--bad); }
 .state[data-state="checking"]::before { background: var(--warn); }

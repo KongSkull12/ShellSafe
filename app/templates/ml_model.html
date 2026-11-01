@@ -26,6 +26,12 @@
     <p><strong>Demo model.</strong> Its labels were copied from the alert thresholds to test the pipeline, so these scores are not real results. Retrain with field observations before reporting them.</p>
 </div>
 {% endif %}
+{% if metrics.proxy %}
+<div class="flash flash-warning" role="status">
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <p><strong>Stand-in dataset, not this station.</strong> {{ metrics.source }} Retrain with field observations before reporting these scores.</p>
+</div>
+{% endif %}
 
 <div class="split">
     <section class="panel" aria-labelledby="cmpTitle">

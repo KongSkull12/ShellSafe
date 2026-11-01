@@ -31,7 +31,7 @@
         <div class="panel-head">
             <div>
                 <h2 id="probesTitle">Probes</h2>
-                <p>Signal is the raw voltage on each analog pin (temperature shows DS18B20s found on the bus). A plugged-in probe usually reads 0.3&ndash;3.0 V; near 0 V means no signal, about 3.3 V means the sensor's output is too high for the ESP32.</p>
+                <p>Signal is the raw voltage on each analog pin (temperature shows DS18B20s found on the bus). A plugged-in probe usually reads 0.3&ndash;3.0 V; near 0 V means no signal, about 3.3 V means the sensor's output is too high for the ESP32. Salinity is calculated from EC and temperature.</p>
             </div>
         </div>
         <div class="table-wrap">
@@ -44,6 +44,14 @@
                         <td><span class="state" data-sensor-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ s.state_label }}</span></td>
                         <td class="num muted" data-sensor-signal>{% if s.key == 'temperature' %}{% if d.get('ds18b20_count') is not none %}{{ d.get('ds18b20_count') }} on bus{% else %}—{% endif %}{% elif (d.get('probe_voltage') or {}).get(s.key) is not none %}{{ '%.3f'|format(d.get('probe_voltage')[s.key]) }} V{% else %}—{% endif %}</td>
                         <td class="num" data-sensor-reading>{% if s.state == 'live' %}{{ s.display }} {{ s.unit }}{% elif s.last_display %}last {{ s.last_display }} {{ s.unit }}{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    {% for s in live.calculated %}
+                    <tr data-sensor-row="{{ s.key }}">
+                        <td class="strong">{{ s.label }}</td>
+                        <td><span class="state" data-sensor-state data-state="{{ s.state }}" data-level="{{ s.level or '' }}">{{ s.state_label }}</span></td>
+                        <td class="num muted" data-sensor-signal>{{ s.signal }}</td>
+                        <td class="num" data-sensor-reading>{% if s.state == 'live' %}{{ s.display }} {{ s.unit }}{% else %}—{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

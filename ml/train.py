@@ -143,8 +143,21 @@ def apply_demo_labels(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(label=bloom.astype(int))
 
 
+def proxy_note(path: str):
+    """Return the note from a '# proxy:' header, or None."""
+    try:
+        with open(path, encoding='utf-8') as fh:
+            line = fh.readline().strip()
+    except OSError:
+        return None
+    prefix = '# proxy:'
+    if line.lower().startswith(prefix):
+        return line[len(prefix):].strip()
+    return None
+
+
 def load_dataset(path: str, features: list) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, comment='#')
     missing = [c for c in features + ['label'] if c not in df.columns]
     if missing:
         sys.exit(f'{path} is missing columns: {", ".join(missing)}')
@@ -168,7 +181,13 @@ def split_data(df: pd.DataFrame, features: list):
     X = df[features].to_numpy(dtype=float)
     y = df['label'].to_numpy(dtype=int)
     groups = None
-    if 'time' in df.columns and df['time'].notna().all():
+    group_name = 'days'
+    # An explicit group (for example pond + day) keeps separate sites from
+    # being treated as one day, while still holding out a whole block.
+    if 'group' in df.columns and df['group'].notna().all():
+        groups = df['group'].astype(str).to_numpy()
+        group_name = 'groups'
+    elif 'time' in df.columns and df['time'].notna().all():
         groups = df['time'].dt.tz_convert(LOCAL_TZ).dt.strftime('%Y-%m-%d').to_numpy()
 
     if groups is not None:
@@ -183,7 +202,7 @@ def split_data(df: pd.DataFrame, features: list):
             if len(set(y[test_idx])) == 2 and folds >= 2:
                 cv = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=SEED)
                 return (X[train_idx], X[test_idx], y_train, y[test_idx],
-                        g_train, cv, 'held-out days')
+                        g_train, cv, f'held-out {group_name}')
 
     print('WARNING: not enough labeled days with both classes for a by-day split.\n'
           '         Falling back to a random split, which overstates the scores.')
@@ -301,6 +320,8 @@ def main():
     parser.add_argument('--dataset', help='CSV that already has a label column')
     parser.add_argument('--demo', action='store_true',
                         help='label readings with the alert thresholds (pipeline test only)')
+    parser.add_argument('--proxy', action='store_true',
+                        help='labels are a public stand-in, not this station (also set by a # proxy: header)')
     parser.add_argument('--features', default=','.join(ALL_FEATURES),
                         help='comma-separated model inputs (default: all five probes)')
     args = parser.parse_args()
@@ -312,7 +333,9 @@ def main():
 
     if args.dataset:
         df = load_dataset(args.dataset, features)
-        source = os.path.basename(args.dataset)
+        note = proxy_note(args.dataset)
+        source = note or os.path.basename(args.dataset)
+        args.proxy = bool(getattr(args, 'proxy', False) or note)
     elif args.readings and (args.observations or args.demo):
         df = load_readings(args.readings, features)
         if args.demo:
@@ -378,6 +401,7 @@ def main():
     exported.update({
         'name': best['name'],
         'demo': bool(args.demo),
+        'proxy': bool(args.proxy),
         'test_f1': best['test']['f1'],
         'trained_at': trained_at,
     })
@@ -387,6 +411,7 @@ def main():
     metrics = {
         'trained_at': trained_at,
         'demo': bool(args.demo),
+        'proxy': bool(args.proxy),
         'source': source,
         'features': features,
         'rows': len(df),
@@ -416,6 +441,9 @@ def main():
     if args.demo:
         print('\nDEMO MODE: labels came from the alert thresholds, so these scores only show\n'
               'the pipeline works. Do not report them as results.')
+    if args.proxy:
+        print('\nPROXY DATA: these scores describe the public stand-in dataset, not this\n'
+              'station. Retrain on field observations before reporting them.')
 
 
 if __name__ == '__main__':

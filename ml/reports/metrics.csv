@@ -1,0 +1,4 @@
+Model,Accuracy,Precision,Recall,F1-Score,CV F1 (mean),CV F1 (std),Best parameters
+Decision Tree,0.9681,0.0423,0.75,0.08,0.1536,0.0955,"{""max_depth"": 12, ""min_samples_leaf"": 1}"
+Support Vector Machine,0.9472,0.0339,1.0,0.0656,0.0982,0.0782,"{""C"": 0.1, ""gamma"": 0.01}"
+Random Forest,0.9968,0.0,0.0,0.0,0.3332,0.2325,"{""max_depth"": 12, ""min_samples_leaf"": 1}"

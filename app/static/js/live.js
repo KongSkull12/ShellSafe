@@ -136,10 +136,13 @@
         setAll('[data-live-count]', function (el) {
             el.textContent = state === 'live' ? String(payload?.link?.live_count ?? 0) : '0';
         });
+        setAll('[data-probe-total]', function (el) {
+            el.textContent = String(payload?.link?.probe_total ?? 5);
+        });
     }
 
     function paintSensors(payload) {
-        (payload.sensors || []).forEach(function (s) {
+        (payload.sensors || []).concat(payload.calculated || []).forEach(function (s) {
             const live = s.state === 'live';
 
             setAll(`[data-plate="${s.key}"]`, function (cell) {
@@ -157,6 +160,8 @@
                     softSwap(state, stateText(s));
                 }
                 if (last) last.textContent = s.last_display ? `last ${s.last_display} ${s.unit}`.trim() : '';
+                const note = cell.querySelector('[data-plate-note]');
+                if (note && s.note) note.textContent = s.note;
             });
 
             setAll(`[data-chart-now="${s.key}"]`, function (box) {
@@ -180,7 +185,8 @@
                 if (signal) {
                     const data = payload.sensor_data || {};
                     const volts = (data.probe_voltage || {})[s.key];
-                    if (s.key === 'temperature') signal.textContent = data.ds18b20_count == null ? '—' : `${data.ds18b20_count} on bus`;
+                    if (s.signal) signal.textContent = s.signal;
+                    else if (s.key === 'temperature') signal.textContent = data.ds18b20_count == null ? '—' : `${data.ds18b20_count} on bus`;
                     else signal.textContent = volts == null ? '—' : `${Number(volts).toFixed(3)} V`;
                 }
                 if (dot) { dot.dataset.state = s.state; dot.dataset.level = s.level || ''; softSwap(dot, s.state_label); }

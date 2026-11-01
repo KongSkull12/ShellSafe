@@ -27,7 +27,7 @@
                 <tr>
                     <td class="strong">{{ report.report_name }}</td>
                     <td><span class="tag">{{ report.report_type }}</span></td>
-                    <td class="muted">{{ report.deleted_date.strftime('%b %d, %Y · %I:%M %p') if report.deleted_date else '—' }}</td>
+                    <td class="muted">{{ report.deleted_date|localtime if report.deleted_date else '—' }}</td>
                     <td class="muted">{{ report.deleted_by or '—' }}</td>
                     <td class="num">
                         <div class="actions" style="justify-content: flex-end; flex-wrap: nowrap;">

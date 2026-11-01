@@ -1,7 +1,11 @@
 """Normalize Firestore alert documents for templates and UI logic."""
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+
+# Stored timestamps are UTC. The station is in the Philippines, which is
+# a fixed UTC+8 (no daylight saving).
+MANILA = timezone(timedelta(hours=8))
 
 ALERT_TITLES = {
     'RISK': 'Bloom Risk Alert',
@@ -11,6 +15,15 @@ ALERT_TITLES = {
 }
 
 RISK_ALERT_TYPES = frozenset({'RISK'})
+
+
+def format_local(value: Any, fmt: str = '%b %d, %Y · %I:%M %p') -> str:
+    """Format a UTC timestamp in Philippine time."""
+    if value is None or not isinstance(value, datetime):
+        return '—'
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(MANILA).strftime(fmt)
 
 
 def _to_datetime(value: Any) -> datetime:

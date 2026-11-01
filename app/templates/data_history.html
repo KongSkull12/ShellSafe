@@ -17,7 +17,7 @@
 </div>
 
 <div class="chart-grid" id="historyCharts">
-    {% for s in live.sensors %}
+    {% for s in live.sensors + live.calculated %}
     <section class="panel chart-panel" data-history-chart="{{ s.key }}" aria-labelledby="h-{{ s.key }}">
         <div class="chart-head">
             <div class="chart-title"><h2 id="h-{{ s.key }}">{{ s.label }}{% if s.unit %} <span>{{ s.unit }}</span>{% endif %}</h2><p>Range in view</p></div>
@@ -41,7 +41,7 @@
     <div class="table-wrap">
         <table class="table">
             <thead>
-                <tr><th>Time</th>{% for s in live.sensors %}<th class="num">{{ s.label }}{% if s.unit %} ({{ s.unit }}){% endif %}</th>{% endfor %}</tr>
+                <tr><th>Time</th>{% for s in live.sensors + live.calculated %}<th class="num">{{ s.label }}{% if s.unit %} ({{ s.unit }}){% endif %}</th>{% endfor %}</tr>
             </thead>
             <tbody id="historyRows"></tbody>
         </table>
@@ -56,13 +56,13 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/trend.js') }}?v=console1"></script>
+<script src="{{ url_for('static', filename='js/trend.js') }}?v=console3"></script>
 <script>
 (function () {
     const history = {{ history|tojson }};
     const T = window.ShellSafeTrend;
     T.seed(history, 720);
-    const KEYS = Object.keys(T.SENSORS);
+    const KEYS = charts.map(function (c) { return c.key; });
     let rangeSeconds = 0;
 
     const charts = Array.from(document.querySelectorAll('[data-history-chart]')).map(function (root) {

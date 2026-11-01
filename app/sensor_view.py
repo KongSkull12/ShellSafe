@@ -32,7 +32,13 @@ STATE_LABELS = {
     'offline': 'Device offline',
     'checking': 'Connecting',
     'nodata': 'No data',
+    'unavailable': 'Unavailable',
 }
+
+# Shown with the probe strip, but not counted as a probe.
+CALCULATED = (
+    ('salinity', 'Salinity', 'ppt', 2, 'Calculated from EC and temperature'),
+)
 
 
 def _format(value: Optional[float], decimals: int) -> Optional[str]:
@@ -92,12 +98,47 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
     return cards
 
 
+def _extension_card(key, label, unit, decimals, state, value, note, signal, level='', level_label=None) -> Dict:
+    display = _format(value, decimals) if state == 'live' else None
+    return {
+        'key': key,
+        'label': label,
+        'unit': unit,
+        'display_unit': unit,
+        'uncalibrated': False,
+        'state': state,
+        'state_label': level_label or STATE_LABELS[state],
+        'value': value if state == 'live' else None,
+        'display': display,
+        'last_display': None,
+        'level': level,
+        'level_label': level_label,
+        'note': note,
+        'signal': signal,
+        'installed': state == 'live',
+    }
+
+
+def build_calculated(reading: Optional[Dict]) -> List[Dict]:
+    link_state = (reading or {}).get('link_state', 'nodata') if reading else 'nodata'
+    value = reading.get('salinity') if reading else None
+    if link_state != 'live':
+        state, level_label, note = link_state, None, CALCULATED[0][4]
+    elif value is not None:
+        state, level_label, note = 'live', 'Calculated', CALCULATED[0][4]
+    else:
+        state, level_label, note = 'unavailable', None, 'Needs calibrated EC and temperature.'
+    key, label, unit, decimals, _default_note = CALCULATED[0]
+    return [_extension_card(key, label, unit, decimals, state, value, note, 'From EC', 'derived' if state == 'live' else '', level_label)]
+
+
 def build_live_payload(reading: Optional[Dict] = None, fetch: bool = True) -> Dict:
     if reading is None and fetch:
         reading = get_latest_sensor_data()
     risk = assess_bloom_risk(reading)
     link_state = reading.get('link_state', 'live') if reading else 'nodata'
     sensors = build_sensor_cards(reading, risk)
+    calculated = build_calculated(reading)
     return {
         'sensor_data': reading,
         'sensor_statuses': get_sensor_statuses(reading),
@@ -113,8 +154,10 @@ def build_live_payload(reading: Optional[Dict] = None, fetch: bool = True) -> Di
             'last_update': reading.get('last_update') if reading else None,
             'timeout_seconds': reading.get('offline_timeout_seconds') if reading else None,
             'live_count': sum(1 for s in sensors if s['state'] == 'live'),
+            'probe_total': len(SENSORS),
         },
         'sensors': sensors,
+        'calculated': calculated,
     }
 
 
@@ -124,6 +167,7 @@ def payload_fingerprint(payload: Dict) -> tuple:
     return (
         payload['link']['state'],
         tuple((s['state'], s['value'], s['level']) for s in payload['sensors']),
+        tuple((s['state'], s['value']) for s in payload.get('calculated') or []),
         payload['risk_assessment'].get('overall_level'),
         payload['ml_prediction'].get('message'),
         reading.get('battery_pct'),

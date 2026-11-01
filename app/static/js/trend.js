@@ -10,6 +10,7 @@
         turbidity: { label: 'Turbidity', unit: 'NTU', decimals: 1 },
         orp: { label: 'ORP', unit: 'mV', decimals: 1 },
         ec: { label: 'EC', unit: 'µS/cm', decimals: 1 },
+        salinity: { label: 'Salinity', unit: 'ppt', decimals: 2 },
     };
     const KEYS = Object.keys(SENSORS);
     const LINE = '#2f5fe0';
@@ -35,7 +36,7 @@
         if (!payload || payload.link?.state !== 'live') return null;
         const sample = { t: Date.now() / 1000 };
         let any = false;
-        (payload.sensors || []).forEach(function (s) {
+        (payload.sensors || []).concat(payload.calculated || []).forEach(function (s) {
             sample[s.key] = s.state === 'live' ? s.value : null;
             if (sample[s.key] != null) any = true;
         });

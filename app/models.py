@@ -124,14 +124,18 @@ class SensorData:
     """Sensor reading data model for Firestore (aligned with shellsafev2.ino)."""
     
     def __init__(self, temperature: float = None, ph: float = None, turbidity: float = None,
-                 orp: float = None, ec: float = None, reading_id: str = None,
-                 timestamp: datetime = None):
+                 orp: float = None, ec: float = None, salinity: float = None,
+                 dissolved_oxygen: float = None, ammonia: float = None,
+                 reading_id: str = None, timestamp: datetime = None):
         self.id = reading_id
         self.temperature = temperature
         self.ph = ph
         self.turbidity = turbidity
         self.orp = orp
         self.ec = ec
+        self.salinity = salinity
+        self.dissolved_oxygen = dissolved_oxygen
+        self.ammonia = ammonia
         self.timestamp = timestamp or datetime.utcnow()
     
     def save(self) -> str:
@@ -143,6 +147,9 @@ class SensorData:
             'turbidity': self.turbidity,
             'orp': self.orp,
             'ec': self.ec,
+            'salinity': self.salinity,
+            'dissolved_oxygen': self.dissolved_oxygen,
+            'ammonia': self.ammonia,
             'timestamp': self.timestamp,
         }
         if self.id:
