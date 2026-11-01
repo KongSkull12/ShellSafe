@@ -27,9 +27,23 @@
     }
 
     function seed(history, max) {
-        store.max = Math.max(store.max, max || 0);
+        const count = Array.isArray(history) ? history.length : 0;
+        store.max = Math.max(store.max, max || 0, count);
         if (store.samples.length || !Array.isArray(history)) return;
         store.samples = history.slice(-store.max);
+    }
+
+    function rememberSample(sample) {
+        if (!sample) return;
+        const last = store.samples[store.samples.length - 1];
+        const same = last && KEYS.every(function (k) { return last[k] === sample[k]; });
+        if (last && same && sample.t - last.t < 5) return;
+        store.samples.push(sample);
+        while (store.samples.length > store.max) store.samples.shift();
+    }
+
+    function capture(payload) {
+        rememberSample(sampleFrom(payload));
     }
 
     function sampleFrom(payload) {
@@ -45,14 +59,7 @@
 
     document.addEventListener('shellsafe:live', function (event) {
         const sample = sampleFrom(event.detail.payload);
-        if (sample) {
-            const last = store.samples[store.samples.length - 1];
-            const same = last && KEYS.every(function (k) { return last[k] === sample[k]; });
-            if (!same || sample.t - last.t >= 5) {
-                store.samples.push(sample);
-                if (store.samples.length > store.max) store.samples.shift();
-            }
-        }
+        rememberSample(sample);
         store.listeners.forEach(function (fn) { fn(event.detail.payload); });
     });
 
@@ -135,6 +142,7 @@
         const key = options.key || root.dataset.chart || 'temperature';
         const sensor = SENSORS[key];
         let span = options.span || 60;
+        let since = null;
         let drawn = false;
 
         const chart = new Chart(canvas.getContext('2d'), {
@@ -234,13 +242,19 @@
             chart.options.animation = false;
         }
 
+        function visibleRows() {
+            if (since) return store.samples.filter(function (r) { return r.t >= since; });
+            return store.samples.slice(-span);
+        }
+
         function render(payload) {
             payload = payload || window.ShellSafeLive?.current;
-            const rows = store.samples.slice(-span);
+            const rows = visibleRows();
             const values = rows.map(function (r) { return r[key] == null ? null : r[key]; });
             const count = values.filter(function (v) { return v != null; }).length;
             chart.data.labels = rows.map(function (r) { return timeLabel(r.t); });
             chart.data.datasets[0].data = values;
+            chart.data.datasets[0].pointRadius = count > 0 && count <= 2 ? 3 : 0;
             chart.options.plugins.shellsafeBand.band = count ? bandFor(payload, key) : null;
             if (!drawn && count) { drawn = true; drawIn(); } else { chart.update('none'); }
 
@@ -261,8 +275,15 @@
 
         store.listeners.push(render);
         render();
-        return { chart: chart, render: render, setSpan: function (n) { span = n; render(); } };
+        return {
+            chart: chart,
+            render: render,
+            setSpan: function (n) { span = n; render(); },
+            setSince: function (t) { since = t || null; render(); },
+        };
     }
 
-    window.ShellSafeTrend = { mount: mount, store: store, SENSORS: SENSORS, timeLabel: timeLabel, seed: seed };
+    window.ShellSafeTrend = {
+        mount: mount, store: store, SENSORS: SENSORS, timeLabel: timeLabel, seed: seed, capture: capture,
+    };
 })();

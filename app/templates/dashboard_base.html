@@ -29,6 +29,7 @@
         </span>
     </div>
     <a class="signout" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-left" aria-hidden="true"></i>Sign out</a>
+    <p class="app-version" title="{{ 'Commit ' ~ app_commit if app_commit else '' }}">v{{ app_version }}{% if app_commit %} · {{ app_commit }}{% endif %}</p>
 </div>
 {% endmacro %}
 <!DOCTYPE html>
@@ -43,7 +44,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v=console1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ asset_version }}">
     {% block styles %}{% endblock %}
 </head>
 <body
@@ -98,8 +99,8 @@
 </dialog>
 
 {% if L %}<script type="application/json" id="liveInitial">{{ L|tojson }}</script>{% endif %}
-<script src="{{ url_for('static', filename='js/ui.js') }}?v=console1"></script>
-<script src="{{ url_for('static', filename='js/live.js') }}?v=console2"></script>
+<script src="{{ url_for('static', filename='js/ui.js') }}?v={{ asset_version }}"></script>
+<script src="{{ url_for('static', filename='js/live.js') }}?v={{ asset_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

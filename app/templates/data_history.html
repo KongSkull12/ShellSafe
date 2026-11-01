@@ -4,7 +4,7 @@
 <div class="page-head">
     <div class="page-head-text">
         <h1>Data history</h1>
-        <p>Live readings recorded by this server since it started, up to the last {{ (720 * 5 / 60)|int }} minutes. The device keeps only its latest reading, so nothing older is stored yet.</p>
+        <p>Saved readings from the device, plus live samples from this session. 15 min and 1 hour zoom the charts and the table.</p>
     </div>
     <div class="actions">
         <div class="tabs" role="group" aria-label="Time range">
@@ -56,18 +56,19 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/trend.js') }}?v=console3"></script>
+<script src="{{ url_for('static', filename='js/trend.js') }}?v={{ asset_version }}"></script>
 <script>
 (function () {
     const history = {{ history|tojson }};
     const T = window.ShellSafeTrend;
-    T.seed(history, 720);
-    const KEYS = charts.map(function (c) { return c.key; });
-    let rangeSeconds = 0;
+    T.seed(history, Math.max(2500, history.length));
+    T.capture(window.ShellSafeLive && window.ShellSafeLive.current);
 
     const charts = Array.from(document.querySelectorAll('[data-history-chart]')).map(function (root) {
-        return { key: root.dataset.historyChart, root: root, view: T.mount(root, { key: root.dataset.historyChart, span: 720, small: true }) };
+        return { key: root.dataset.historyChart, root: root, view: T.mount(root, { key: root.dataset.historyChart, span: 2500, small: true }) };
     });
+    const KEYS = charts.map(function (c) { return c.key; });
+    let rangeSeconds = 0;
 
     function rows() {
         const all = T.store.samples;
@@ -77,7 +78,8 @@
     }
 
     function fmt(key, v) {
-        return v == null ? '—' : Number(v).toFixed(T.SENSORS[key].decimals);
+        const spec = T.SENSORS[key];
+        return v == null || !spec ? '—' : Number(v).toFixed(spec.decimals);
     }
 
     function renderStats(list) {
@@ -116,8 +118,8 @@
     }
 
     function renderCharts() {
-        const span = rangeSeconds ? Math.max(1, rows().length) : 720;
-        charts.forEach(function (c) { if (c.view) { c.view.setSpan(span); } });
+        const since = rangeSeconds ? Date.now() / 1000 - rangeSeconds : null;
+        charts.forEach(function (c) { if (c.view && c.view.setSince) c.view.setSince(since); });
     }
 
     document.querySelectorAll('[data-range]').forEach(function (btn) {

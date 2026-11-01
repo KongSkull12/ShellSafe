@@ -10,10 +10,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v=console1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ asset_version }}">
 </head>
 <body>
     {% block content %}{% endblock %}
-    <script src="{{ url_for('static', filename='js/ui.js') }}?v=console1"></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

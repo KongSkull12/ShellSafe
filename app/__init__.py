@@ -66,6 +66,12 @@ def create_app(config_class=None):
         start_sensor_sampler(on_sample=on_sample)
 
     @app.context_processor
+    def inject_version():
+        from app.version import APP_VERSION, APP_COMMIT, ASSET_VERSION
+        return {'app_version': APP_VERSION, 'app_commit': APP_COMMIT,
+                'asset_version': ASSET_VERSION}
+
+    @app.context_processor
     def inject_unread_alert_count():
         from flask_login import current_user
         if not current_user.is_authenticated:

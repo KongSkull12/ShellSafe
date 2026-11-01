@@ -190,7 +190,7 @@ def delete_permanently(alert_id):
 def data_history():
     return render_template('data_history.html', title='Data history',
                            live=build_live_payload(),
-                           history=get_history())
+                           history=get_history(1440))
 
 
 @bp.route('/model')

@@ -41,9 +41,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 1. Push the project to a GitHub repository without local secrets.
 2. In Vercel, choose **Add New → Project** and import that repository.
 3. Keep the project root at the repository root. Vercel detects the Flask app
-   from the root `index.py` entrypoint and installs `requirements.txt`. Keep
-   `index.py` as the entry point; do not add a root-level `app.py`, which
-   conflicts with the existing `app/` package.
+   from the root `index.py` entrypoint and installs `requirements.txt`.
 4. Add the environment variables above and deploy.
 5. Visit the deployment URL and verify login, dashboards, Firestore reads, and
    live sensor data.

@@ -42,8 +42,8 @@ _LATEST_CACHE_TTL = float(os.environ.get('SENSOR_CACHE_TTL_SECONDS', '2.5'))
 # Track whether firmware uptime is still advancing; if it stalls, device is offline.
 _uptime_tracker: Dict[str, Dict[str, float]] = {}
 
-# Readings seen while the server runs. RTDB only holds the latest snapshot,
-# so this is the only history available without a firmware change.
+# Readings seen while the server runs. The device also appends one sample
+# per minute under /readings; get_history() merges the two.
 HISTORY_MAX_SAMPLES = int(os.environ.get('SENSOR_HISTORY_SAMPLES', '720'))
 _history: Deque[Dict] = deque(maxlen=HISTORY_MAX_SAMPLES)
 _history_lock = threading.Lock()
@@ -509,13 +509,35 @@ def get_live_history() -> List[Dict]:
 READINGS_PATH = '/readings'
 _stored_cache: Dict[str, object] = {'data': None, 'expires': 0.0, 'limit': 0}
 _STORED_CACHE_TTL = 30.0
+_LOG_FIELDS = tuple(spec[0] for spec in SENSOR_SPECS) + ('salinity',)
 
 
-def get_stored_history(limit: int = 720) -> List[Dict]:
+def _epoch_seconds(value) -> Optional[float]:
+    """Firebase server timestamps are milliseconds. Plain unix seconds pass through."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value > 10_000_000_000:
+        value = value / 1000.0
+    if value < 1_000_000_000:
+        return None
+    return float(value)
+
+
+def _sample_from_log(record: Dict) -> Optional[Dict]:
+    t = _epoch_seconds(record.get('t'))
+    if t is None:
+        return None
+    sample = {'t': t}
+    for key in _LOG_FIELDS:
+        sample[key] = _to_float(record.get(key))
+    return sample
+
+
+def get_stored_history(limit: int = 1440) -> List[Dict]:
     """
-    Per-minute readings the firmware logs to /readings (firmware v5+), in
-    the same shape as get_live_history(). Survives server restarts and
-    works on Vercel, where the in-memory history does not persist.
+    Per-minute readings the firmware logs to /readings, in the same shape as
+    get_live_history(). Survives server restarts and works on Vercel, where
+    the in-memory history does not persist.
     """
     now = time.time()
     if _stored_cache['data'] is not None and now < float(_stored_cache['expires']) \
@@ -528,24 +550,46 @@ def get_stored_history(limit: int = 720) -> List[Dict]:
     except Exception:
         return []
 
+    records = data.values() if isinstance(data, dict) else data if isinstance(data, list) else []
     samples = []
-    for record in data.values():
-        if not isinstance(record, dict) or not isinstance(record.get('t'), (int, float)):
+    for record in records:
+        if not isinstance(record, dict):
             continue
-        sample = {'t': record['t'] / 1000.0}
-        for spec_key, *_rest in SENSOR_SPECS:
-            sample[spec_key] = _to_float(record.get(spec_key))
-        samples.append(sample)
+        sample = _sample_from_log(record)
+        if sample is not None:
+            samples.append(sample)
     samples.sort(key=lambda s: s['t'])
 
     _stored_cache.update({'data': samples, 'expires': now + _STORED_CACHE_TTL, 'limit': limit})
     return samples
 
 
-def get_history(limit: int = 720) -> List[Dict]:
-    """Stored per-minute log when the firmware writes one, else this server's memory."""
+def _merge_history(stored: List[Dict], live: List[Dict], limit: int) -> List[Dict]:
+    """Minute log plus the denser session buffer, one row per couple of seconds."""
+    rows = [dict(s) for s in stored if isinstance(s.get('t'), (int, float))]
+    rows.extend(dict(s) for s in live if isinstance(s.get('t'), (int, float)))
+    rows.sort(key=lambda s: s['t'])
+    merged: List[Dict] = []
+    for sample in rows:
+        if merged and abs(sample['t'] - merged[-1]['t']) < 2:
+            prev = merged[-1]
+            for key, value in sample.items():
+                if key != 't' and prev.get(key) is None and value is not None:
+                    prev[key] = value
+            continue
+        merged.append(sample)
+    return merged[-limit:]
+
+
+def get_history(limit: int = 1440) -> List[Dict]:
+    """Device minute-log plus readings this server has seen, oldest first."""
     stored = get_stored_history(limit)
-    return stored if stored else get_live_history()[-limit:]
+    live = get_live_history()
+    if not stored:
+        return live[-limit:]
+    if not live:
+        return stored[-limit:]
+    return _merge_history(stored, live, limit + len(live))
 
 
 def get_latest_sensor_data(use_cache: bool = True) -> Optional[Dict]:
