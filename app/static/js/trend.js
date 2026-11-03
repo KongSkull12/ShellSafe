@@ -51,7 +51,7 @@
         const sample = { t: Date.now() / 1000 };
         let any = false;
         (payload.sensors || []).concat(payload.calculated || []).forEach(function (s) {
-            sample[s.key] = s.state === 'live' ? s.value : null;
+            sample[s.key] = (s.state === 'live' || s.state === 'dry' || s.state === 'out_of_water') ? s.value : null;
             if (sample[s.key] != null) any = true;
         });
         return any ? sample : null;

@@ -247,22 +247,36 @@ def humanize_age(seconds: Optional[float]) -> str:
 def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
     """Map RTDB field names from shellsafev2.ino to template/API format."""
     temperature, temperature_connected = _parse_sensor_value(raw.get('temperature'))
+    def _flag_dry(value) -> bool:
+        return value is True or (
+            isinstance(value, str) and value.strip().lower() in {'true', '1', 'yes'}
+        )
+
     ph, ph_connected = _parse_sensor_value(raw.get('pH', raw.get('ph')))
     raw_turbidity = raw.get('turbidity_NTU', raw.get('turbidity'))
-    turbidity, turbidity_connected = _parse_sensor_value(raw_turbidity)
-    turbidity_dry = raw.get('turbidity_dry')
-    turbidity_out_of_water = turbidity_dry is True or (
-        isinstance(turbidity_dry, str)
-        and turbidity_dry.strip().lower() in {'true', '1', 'yes'}
-    ) or (
-        isinstance(raw_turbidity, str)
-        and raw_turbidity.strip().lower() == 'out of water'
-    )
+    # Older firmware sent the string "Out of water" instead of 0 + turbidity_dry.
+    if isinstance(raw_turbidity, str) and raw_turbidity.strip().lower() == 'out of water':
+        turbidity, turbidity_connected = 0.0, True
+        turbidity_dry = True
+    else:
+        turbidity, turbidity_connected = _parse_sensor_value(raw_turbidity)
+        turbidity_dry = _flag_dry(raw.get('turbidity_dry'))
     orp, orp_connected = _parse_sensor_value(raw.get('ORP_mV', raw.get('orp')))
     ec, ec_connected = _parse_sensor_value(raw.get('EC_uS_cm', raw.get('ec')))
-    ec_dry = raw.get('ec_dry') is True or (
-        isinstance(raw.get('ec_dry'), str) and raw.get('ec_dry').strip().lower() in {'true', '1', 'yes'}
-    )
+    ec_dry = _flag_dry(raw.get('ec_dry'))
+    ph_dry = _flag_dry(raw.get('ph_dry'))
+    orp_dry = _flag_dry(raw.get('orp_dry'))
+    # New firmware zeros pH/turbidity/ORP whenever EC is dry. Older builds only
+    # sent turbidity_dry; mirror EC dry onto the other three so the dashboard
+    # matches the EC "show 0 when dry" behaviour.
+    if ec_dry:
+        if ph_connected and 'ph_dry' not in raw:
+            ph, ph_dry = 0.0, True
+        if turbidity_connected and 'turbidity_dry' not in raw and not turbidity_dry:
+            turbidity, turbidity_dry = 0.0, True
+        if orp_connected and 'orp_dry' not in raw:
+            orp, orp_dry = 0.0, True
+    turbidity_out_of_water = turbidity_dry  # kept for older template/risk checks
     salinity, salinity_reported = _parse_sensor_value(
         raw.get('salinity_ppt', raw.get('salinity_PSU', raw.get('salinity')))
     )
@@ -326,8 +340,11 @@ def _normalize_reading(raw: Dict, device_id: str = 'SH-001') -> Dict:
         'temperature': temperature,
         'ph': ph,
         'turbidity': turbidity,
+        'turbidity_dry': turbidity_dry,
         'turbidity_out_of_water': turbidity_out_of_water,
         'orp': orp,
+        'orp_dry': orp_dry,
+        'ph_dry': ph_dry,
         'ec': ec,
         'ec_dry': ec_dry,
         'salinity': salinity,
@@ -451,10 +468,16 @@ def get_sensor_statuses(reading: Optional[Dict]) -> List[Dict]:
         connected = bool(reading.get(flag, value is not None))
         active = _sensor_is_active(value, key, connected)
 
-        if key == 'turbidity' and reading.get('turbidity_out_of_water'):
-            status_label = 'Out of water'
+        dry = bool(
+            (key == 'ph' and reading.get('ph_dry'))
+            or (key == 'turbidity' and (reading.get('turbidity_dry') or reading.get('turbidity_out_of_water')))
+            or (key == 'orp' and reading.get('orp_dry'))
+            or (key == 'ec' and reading.get('ec_dry'))
+        )
+        if dry and active:
+            status_label = 'Dry'
             status_class = 'warning'
-            display = 'Out of water'
+            display = _format_sensor_reading(key, 0 if value is None else value, unit)
         elif active:
             status_label = 'Active'
             status_class = 'success'

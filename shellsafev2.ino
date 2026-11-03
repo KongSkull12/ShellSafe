@@ -181,11 +181,12 @@ bool turbidityConnected = false;
 bool orpConnected = false;
 bool ecConnected = false;
 bool ecDry = false;   // EC board present but probe out of the water
-// The turbidity sensor cannot tell air from water: in air its light path
-// changes and it reports a false NTU value. The EC probe can (no
-// conductivity in air), so while the EC probe is dry the turbidity
-// reading is reported as "Out of water". Mount both probes at the same depth.
-bool turbidityOutOfWater = false;
+// pH, turbidity and ORP cannot tell air from water on their own. They are
+// mounted at the same depth as the EC probe, so when EC is dry they report
+// 0 (like EC) and resume automatic readings as soon as EC is wet again.
+bool phDry = false;
+bool turbidityDry = false;
+bool orpDry = false;
 
 // ============================================================
 // SENSOR VOLTAGES
@@ -325,7 +326,32 @@ float ecCalibrationK = 1.0f;
 bool ecCalibrated = false;
 
 int phPointCount() { return (int)phAcid.set + (int)phNeutral.set + (int)phAlk.set; }
-bool phCalibrated() { return phPointCount() >= 2; }
+
+// A healthy amplified pH board usually moves by well over 100 mV between
+// buffers. Points that are almost the same voltage make a near-vertical
+// slope, so a few millivolts of noise become whole pH units.
+const float PH_MIN_BUFFER_DELTA_V = 0.10f;
+const float PH_MIN_SLOPE = 2.0f;    // pH per volt
+const float PH_MAX_SLOPE = 25.0f;
+
+bool phPairSane(const PhPoint& a, const PhPoint& b)
+{
+    if (!a.set || !b.set) return false;
+    float dv = fabsf(b.volts - a.volts);
+    if (dv < PH_MIN_BUFFER_DELTA_V) return false;
+    float slope = fabsf((b.ph - a.ph) / dv);
+    return slope >= PH_MIN_SLOPE && slope <= PH_MAX_SLOPE;
+}
+
+bool phCalibrationSane()
+{
+    if (phAcid.set && phNeutral.set && !phPairSane(phAcid, phNeutral)) return false;
+    if (phNeutral.set && phAlk.set && !phPairSane(phNeutral, phAlk)) return false;
+    if (phAcid.set && phAlk.set && !phNeutral.set && !phPairSane(phAcid, phAlk)) return false;
+    return phPointCount() >= 2;
+}
+
+bool phCalibrated() { return phCalibrationSane(); }
 
 // ============================================================
 // ADC
@@ -361,6 +387,23 @@ float rawToVoltage(float raw)
     return raw * (3.3f / 4095.0f);
 }
 
+// Prefer the ESP32's calibrated millivolt API. The plain count * 3.3/4095
+// curve is several percent off on many boards, which shows up as wrong pH
+// after a careful buffer calibration.
+float readPinVoltage(int pin)
+{
+    (void)analogRead(pin);
+    delayMicroseconds(300);
+    uint32_t totalMv = 0;
+    const int samples = 64;
+    for (int i = 0; i < samples; i++)
+    {
+        totalMv += analogReadMilliVolts(pin);
+        delayMicroseconds(200);
+    }
+    return (totalMv / (float)samples) / 1000.0f;
+}
+
 // Returns true when this check's reading is usable; p.connected carries
 // the debounced state.
 bool updateProbe(ProbeState& p)
@@ -368,7 +411,7 @@ bool updateProbe(ProbeState& p)
     float v[5];
     for (int i = 0; i < 5; i++)
     {
-        v[i] = rawToVoltage(readAdcAverage(p.pin));
+        v[i] = readPinVoltage(p.pin);
         delay(15);
     }
     for (int i = 1; i < 5; i++)
@@ -1252,6 +1295,9 @@ float phLine(const PhPoint& a, const PhPoint& b, float v)
 
 float phFromVoltage(float v)
 {
+    if (!phCalibrationSane())
+        return 7.0f;   // not calibrated; the dashboard shows volts instead
+
     float pH;
     if (phAcid.set && phNeutral.set && phAlk.set)
     {
@@ -1270,7 +1316,7 @@ float phFromVoltage(float v)
             if (!a) a = p;
             else if (!b) b = p;
         }
-        if (!a || !b) return 7.0f;   // not calibrated; the dashboard shows volts
+        if (!a || !b) return 7.0f;
         pH = phLine(*a, *b, v);
     }
     return constrain(pH, 0.0f, 14.0f);
@@ -1392,6 +1438,15 @@ void loadCalibration()
             slot = PhPoint{p, calPrefs.getFloat("ph_v2", 0.0f), true};
         }
     }
+    bool dropBadPh = false;
+    if (phPointCount() >= 2 && !phCalibrationSane())
+    {
+        Serial.println("pH calibration discarded: buffer voltages were too close for a usable slope. Recalibrate with CAL PH.");
+        phAcid.set = false;
+        phNeutral.set = false;
+        phAlk.set = false;
+        dropBadPh = true;
+    }
     turbidityCalibrated = calPrefs.getBool("turb", false);
     turbidityClearVoltage = calPrefs.getFloat("turb_v0", turbidityClearVoltage);
     turbidityVoltsPerNtu = calPrefs.getFloat("turb_vpn", turbidityVoltsPerNtu);
@@ -1401,6 +1456,7 @@ void loadCalibration()
     ecCalibrationK = calPrefs.getFloat("ec_k", ecCalibrationK);
     ecZeroVoltage = calPrefs.getFloat("ec_v0", ecZeroVoltage);
     calPrefs.end();
+    if (dropBadPh) saveCalibration();
 }
 
 void saveCalibration()
@@ -1497,7 +1553,7 @@ bool sampleRawVoltage(int pin, float& volts)
     float v[7];
     for (int i = 0; i < 7; i++)
     {
-        v[i] = rawToVoltage(readAdcAverage(pin));
+        v[i] = readPinVoltage(pin);
         delay(60);
     }
     for (int i = 1; i < 7; i++)
@@ -1558,27 +1614,43 @@ bool handleCalibrationCommand(String cmd)
         PhPoint* slots[3] = {&phAcid, &phNeutral, &phAlk};
         for (PhPoint* p : slots)
         {
-            // Two buffers at the same voltage means the probe was not moved.
-            if (p != &slot && p->set && fabs(v - p->volts) < 0.02f)
+            // Buffers too close in voltage mean the probe never settled, was
+            // still wet with the previous buffer, or is not responding.
+            if (p != &slot && p->set && fabsf(v - p->volts) < PH_MIN_BUFFER_DELTA_V)
             {
-                calSay(String("CAL FAILED: same voltage as the pH ") + String(p->ph, 2) +
-                       " buffer. Is the probe really in the pH " + String(buffer, 2) + " buffer?");
+                calSay(String("CAL FAILED: only ") + String(fabsf(v - p->volts) * 1000.0f, 0) +
+                       " mV from the pH " + String(p->ph, 2) + " point (" + String(p->volts, 3) +
+                       " V). Rinse the probe, wait 1-2 minutes in the pH " + String(buffer, 2) +
+                       " buffer until the signal stops moving, then try again.");
                 return false;
             }
         }
         slot = {buffer, v, true};
         int count = phPointCount();
+        if (count >= 2 && !phCalibrationSane())
+        {
+            calSay(String("CAL FAILED: pH points are too close in voltage for a usable slope. ") +
+                   "Clear with CAL RESET, then recalibrate after the probe has fully settled in each buffer.");
+            slot.set = false;
+            return false;
+        }
+        float check = phFromVoltage(v);
         calDetail = String("pH ") + String(buffer, 2) + " point saved at " + String(v, 3) + " V. " +
-                    (count >= 2 ? String("pH is calibrated (") + count + " buffers)." :
-                                  String("Next: rinse the probe and calibrate in a second buffer."));
+                    (count >= 2
+                         ? String("pH is calibrated (") + count + " buffers). In this buffer the reading is now " +
+                           String(check, 2) + "."
+                         : String("Next: rinse the probe and calibrate in a second buffer."));
     }
     else if (what == "TURB0")
     {
         if (!sampleProbeVoltage(turbidityProbe, v)) return false;
         turbidityClearVoltage = v;
-        turbidityVoltsPerNtu = (v * 0.12f) / 1000.0f;   // keep the default ratio until a standard is used
+        // Estimated scale only until a turbidity standard is used. Prefer
+        // CAL TURB <ntu> for accurate readings in solutions.
+        turbidityVoltsPerNtu = (v * 0.12f) / 1000.0f;
         turbidityCalibrated = true;
-        calDetail = String("Clean water set as 0 NTU at ") + String(v, 3) + " V.";
+        calDetail = String("Clean water set as 0 NTU at ") + String(v, 3) +
+                    " V. For accurate NTU in a standard, run CAL TURB next.";
     }
     else if (what == "TURB")
     {
@@ -1586,9 +1658,18 @@ bool handleCalibrationCommand(String cmd)
         if (value <= 0.0f) { calSay("Usage: CAL TURB <ntu of the standard>"); return false; }
         if (!sampleProbeVoltage(turbidityProbe, v)) return false;
         float drop = turbidityClearVoltage - v;
-        if (drop < 0.01f) { calSay("CAL FAILED: no voltage drop versus clean water. Is the probe in the standard?"); return false; }
+        if (drop < 0.03f)
+        {
+            calSay(String("CAL FAILED: only ") + String(drop * 1000.0f, 0) +
+                   " mV below clean water (" + String(turbidityClearVoltage, 3) +
+                   " V). Fill the gap between the prongs, wait for the signal to fall, then try again.");
+            return false;
+        }
         turbidityVoltsPerNtu = drop / value;
-        calDetail = String("Turbidity scale set from the ") + String(value, 0) + " NTU standard (" + String(v, 3) + " V).";
+        float check = turbidityFromVoltage(v);
+        calDetail = String("Turbidity scale set from the ") + String(value, 0) +
+                    " NTU standard (" + String(v, 3) + " V). Reading is now " +
+                    String(check, 1) + " NTU.";
     }
     else if (what == "ORP")
     {
@@ -1800,12 +1881,12 @@ String alertLines()
 {
     String alertMsg = "";
 
-    if (phConnected && phCalibrated() && (currentPH < ALERT_PH_MIN || currentPH > ALERT_PH_MAX))
+    if (phConnected && !phDry && phCalibrated() && (currentPH < ALERT_PH_MIN || currentPH > ALERT_PH_MAX))
     {
         alertMsg += " pH=";
         alertMsg += String(currentPH, 2);
     }
-    if (turbidityConnected && !turbidityOutOfWater && turbidityCalibrated && currentTurbidity > ALERT_TURBIDITY_MAX)
+    if (turbidityConnected && !turbidityDry && turbidityCalibrated && currentTurbidity > ALERT_TURBIDITY_MAX)
     {
         alertMsg += " Turb=";
         alertMsg += String(currentTurbidity, 1);
@@ -1817,13 +1898,13 @@ String alertLines()
         alertMsg += String(currentTemperature, 1);
         alertMsg += "C";
     }
-    if (orpConnected && orpCalibrated && currentORP < ALERT_ORP_MIN)
+    if (orpConnected && !orpDry && orpCalibrated && currentORP < ALERT_ORP_MIN)
     {
         alertMsg += " ORP=";
         alertMsg += String(currentORP, 1);
         alertMsg += "mV";
     }
-    if (ecConnected && ecCalibrated && currentEC > ALERT_EC_MAX)
+    if (ecConnected && !ecDry && ecCalibrated && currentEC > ALERT_EC_MAX)
     {
         alertMsg += " EC=";
         alertMsg += String(currentEC, 1);
@@ -1912,19 +1993,19 @@ void sendDataToFirebase()
         jsonDoc["pH"] = roundf(currentPH * 100.0f) / 100.0f;
     else
         jsonDoc["pH"] = "Disconnected";
+    jsonDoc["ph_dry"] = phDry;
 
-    if (turbidityOutOfWater)
-        jsonDoc["turbidity_NTU"] = "Out of water";
-    else if (turbidityConnected)
+    if (turbidityConnected)
         jsonDoc["turbidity_NTU"] = roundf(currentTurbidity * 10.0f) / 10.0f;
     else
         jsonDoc["turbidity_NTU"] = "Disconnected";
-    jsonDoc["turbidity_dry"] = turbidityOutOfWater;
+    jsonDoc["turbidity_dry"] = turbidityDry;
 
     if (orpConnected)
         jsonDoc["ORP_mV"] = roundf(currentORP * 10.0f) / 10.0f;
     else
         jsonDoc["ORP_mV"] = "Disconnected";
+    jsonDoc["orp_dry"] = orpDry;
 
     if (ecConnected)
         jsonDoc["EC_uS_cm"] = roundf(currentEC * 10.0f) / 10.0f;
@@ -1971,6 +2052,7 @@ void sendDataToFirebase()
         point["v"] = roundf(p->volts * 1000.0f) / 1000.0f;
     }
     calInfo["turb_v0"] = roundf(turbidityClearVoltage * 1000.0f) / 1000.0f;
+    calInfo["turb_vpn"] = turbidityVoltsPerNtu;
     calInfo["orp_off"] = roundf(orpCalibrationOffset * 10.0f) / 10.0f;
     calInfo["ec_k"] = roundf(ecCalibrationK * 10000.0f) / 10000.0f;
     calInfo["ec_v0"] = roundf(ecZeroVoltage * 1000.0f) / 1000.0f;
@@ -2050,10 +2132,10 @@ void pushReadingLog()
     JsonObject ts = doc.createNestedObject("t");
     ts[".sv"] = "timestamp";
     if (tempSensorFound) doc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
-    if (phConnected) doc["ph"] = roundf(currentPH * 100.0f) / 100.0f;
-    if (turbidityConnected && !turbidityOutOfWater) doc["turbidity"] = roundf(currentTurbidity * 10.0f) / 10.0f;
-    if (orpConnected) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
-    // A dry probe's 0 is not a water reading; leave it out of the training log.
+    // Dry zeros are not water readings; leave them out of the training log.
+    if (phConnected && !phDry) doc["ph"] = roundf(currentPH * 100.0f) / 100.0f;
+    if (turbidityConnected && !turbidityDry) doc["turbidity"] = roundf(currentTurbidity * 10.0f) / 10.0f;
+    if (orpConnected && !orpDry) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
     if (ecConnected && !ecDry) doc["ec"] = roundf(currentEC * 10.0f) / 10.0f;
     if (salinityValid) doc["salinity"] = roundf(currentSalinity * 100.0f) / 100.0f;
     if (doInstalled && !isnan(currentDO)) doc["do"] = roundf(currentDO * 100.0f) / 100.0f;
@@ -2294,7 +2376,17 @@ void readAllSensors()
     currentEC = readEC();
     currentDO = readDissolvedOxygenMgL();
     currentNH3 = readAmmoniaMgL();
-    turbidityOutOfWater = turbidityConnected && ecDry;
+
+    // Same dry behaviour as EC: when the EC probe is in air, the other three
+    // water probes report 0. As soon as EC is wet again, their live values
+    // come back automatically from the reads above.
+    phDry = turbidityDry = orpDry = false;
+    if (ecConnected && ecDry)
+    {
+        if (phConnected) { currentPH = 0.0f; phDry = true; }
+        if (turbidityConnected) { currentTurbidity = 0.0f; turbidityDry = true; }
+        if (orpConnected) { currentORP = 0.0f; orpDry = true; }
+    }
     updateSalinity();
 
     Serial.println();
@@ -2307,16 +2399,18 @@ void readAllSensors()
     else Serial.println("DISCONNECTED");
 
     Serial.print("pH          : ");
-    if (phConnected) { Serial.print(currentPH, 2); Serial.println(phCalibrated() ? "" : "  (NOT CALIBRATED)"); }
+    if (phConnected && phDry) Serial.println("0.00  (probe dry / in air)");
+    else if (phConnected) { Serial.print(currentPH, 2); Serial.println(phCalibrated() ? "" : "  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("Turbidity   : ");
-    if (turbidityOutOfWater) Serial.println("OUT OF WATER (EC probe is dry)");
+    if (turbidityConnected && turbidityDry) Serial.println("0.0 NTU  (probe dry / in air)");
     else if (turbidityConnected) { Serial.print(currentTurbidity, 1); Serial.println(turbidityCalibrated ? " NTU" : " NTU  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("ORP         : ");
-    if (orpConnected) { Serial.print(currentORP, 1); Serial.println(orpCalibrated ? " mV" : " mV  (NOT CALIBRATED)"); }
+    if (orpConnected && orpDry) Serial.println("0.0 mV  (probe dry / in air)");
+    else if (orpConnected) { Serial.print(currentORP, 1); Serial.println(orpCalibrated ? " mV" : " mV  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("EC          : ");

@@ -345,6 +345,12 @@ code { font-family: var(--font-mono); font-size: 12px; background: var(--surface
 .state[data-state="live"][data-level="derived"]::before { background: var(--ok); }
 .state[data-state="live"][data-level="derived"] { color: var(--text-3); }
 .state[data-state="unavailable"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
+.state[data-state="dry"]::before,
+.state[data-state="out_of_water"]::before { background: var(--warn); }
+.state[data-state="dry"],
+.state[data-state="out_of_water"] { color: var(--warn-text); }
+.metric[data-state="dry"] .num,
+.metric[data-state="out_of_water"] .num { color: var(--text); font-weight: 600; }
 .metrics-extra { margin-top: 16px; }
 .metric-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-3); }
 .state[data-state="offline"]::before,

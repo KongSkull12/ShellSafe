@@ -123,18 +123,28 @@ def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
     thresholds = get_thresholds()
     parameters = []
     calibrated = sensor_data.get('calibrated') or {}
+    dry_flags = {
+        'ph': 'ph_dry',
+        'turbidity': 'turbidity_dry',
+        'orp': 'orp_dry',
+        'ec': 'ec_dry',
+    }
     for key in SENSOR_ORDER:
-        if key == 'turbidity' and sensor_data.get('turbidity_out_of_water'):
+        dry = bool(
+            sensor_data.get(dry_flags.get(key))
+            or (key == 'turbidity' and sensor_data.get('turbidity_out_of_water'))
+        )
+        connected = _sensor_connected(sensor_data, key)
+        if dry and connected:
             parameters.append({
                 'key': key,
                 'name': (thresholds.get(key) or DEFAULT_THRESHOLDS.get(key, {})).get('label', key),
-                'value': None,
-                'display': 'Out of water',
+                'value': 0.0,
+                'display': '0',
                 'level': 'disconnected',
-                'label': 'Out of water',
+                'label': 'Dry',
             })
             continue
-        connected = _sensor_connected(sensor_data, key)
         value = _to_float(sensor_data.get(key)) if connected else None
         param = _assess_parameter(key, value, connected, thresholds)
         if connected and value is not None and calibrated.get(key) is False:

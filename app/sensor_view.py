@@ -27,12 +27,20 @@ SENSORS = (
 
 STATE_LABELS = {
     'live': 'Live',
+    'dry': 'Dry',
     'unplugged': 'Probe unplugged',
-    'out_of_water': 'Out of water',
+    'out_of_water': 'Dry',
     'offline': 'Device offline',
     'checking': 'Connecting',
     'nodata': 'No data',
     'unavailable': 'Unavailable',
+}
+
+_DRY_FLAGS = {
+    'ph': 'ph_dry',
+    'turbidity': 'turbidity_dry',
+    'orp': 'orp_dry',
+    'ec': 'ec_dry',
 }
 
 # Shown with the probe strip, but not counted as a probe.
@@ -56,10 +64,17 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
         value = reading.get(key) if reading else None
         connected = bool(reading.get(flag)) if reading else False
 
+        dry_flag = _DRY_FLAGS.get(key)
+        is_dry = bool(
+            dry_flag and (reading or {}).get(dry_flag)
+            or (key == 'turbidity' and (reading or {}).get('turbidity_out_of_water'))
+        )
         if link_state == 'live':
             state = 'live' if connected and value is not None else 'unplugged'
-            if key == 'turbidity' and (reading or {}).get('turbidity_out_of_water'):
-                state = 'out_of_water'
+            # Same as EC: dry probes stay connected and show 0.
+            if is_dry and connected:
+                state = 'dry'
+                value = 0.0
         else:
             state = link_state
 
@@ -70,8 +85,11 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
             level_label = levels[key].get('label')
             if level == 'uncalibrated':
                 level = None
+        elif state == 'dry':
+            level_label = 'Dry'
 
-        display = _format(value, decimals) if state == 'live' else None
+        show_value = state in ('live', 'dry')
+        display = _format(value, decimals) if show_value else None
         display_unit = unit
         calibrated = (reading or {}).get('calibrated') or {}
         volts = ((reading or {}).get('probe_voltage') or {}).get(key)
@@ -88,7 +106,7 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
             'uncalibrated': uncalibrated,
             'state': state,
             'state_label': STATE_LABELS[state],
-            'value': value if state == 'live' and not uncalibrated else None,
+            'value': value if show_value and not uncalibrated else None,
             'display': display,
             # Last known value is shown muted on offline cards, never as live.
             'last_display': _format(value, decimals) if state == 'offline' and connected else None,

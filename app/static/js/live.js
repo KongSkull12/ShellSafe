@@ -113,7 +113,9 @@
     }
 
     function stateText(s) {
-        return s.state === 'live' ? (s.level_label || 'Live') : s.state_label;
+        if (s.state === 'live') return s.level_label || 'Live';
+        if (s.state === 'dry' || s.state === 'out_of_water') return s.level_label || 'Dry';
+        return s.state_label;
     }
 
     function setAll(selector, fn) {
@@ -143,7 +145,7 @@
 
     function paintSensors(payload) {
         (payload.sensors || []).concat(payload.calculated || []).forEach(function (s) {
-            const live = s.state === 'live';
+            const show = s.state === 'live' || s.state === 'dry' || s.state === 'out_of_water';
 
             setAll(`[data-plate="${s.key}"]`, function (cell) {
                 cell.dataset.state = s.state;
@@ -152,8 +154,8 @@
                 const unit = cell.querySelector('[data-plate-unit]');
                 const state = cell.querySelector('[data-plate-state]');
                 const last = cell.querySelector('[data-plate-last]');
-                if (num) setDigits(num, live ? s.display : '—');
-                if (unit) { unit.textContent = s.display_unit || ''; unit.hidden = !(live && s.display_unit); }
+                if (num) setDigits(num, show && s.display ? s.display : '—');
+                if (unit) { unit.textContent = s.display_unit || ''; unit.hidden = !(show && s.display_unit); }
                 if (state) {
                     state.dataset.state = s.state;
                     state.dataset.level = s.level || '';
@@ -169,8 +171,8 @@
                 const val = box.querySelector('[data-chart-val]');
                 const unit = box.querySelector('[data-chart-unit]');
                 const state = box.querySelector('[data-chart-state]');
-                if (val) val.textContent = live ? s.display : '—';
-                if (unit) { unit.textContent = s.display_unit || ''; unit.hidden = !(live && s.display_unit); }
+                if (val) val.textContent = show && s.display ? s.display : '—';
+                if (unit) { unit.textContent = s.display_unit || ''; unit.hidden = !(show && s.display_unit); }
                 if (state) {
                     state.dataset.state = s.state;
                     state.dataset.level = s.level || '';
@@ -190,7 +192,11 @@
                     else signal.textContent = volts == null ? '—' : `${Number(volts).toFixed(3)} V`;
                 }
                 if (dot) { dot.dataset.state = s.state; dot.dataset.level = s.level || ''; softSwap(dot, s.state_label); }
-                if (reading) reading.textContent = live ? `${s.display} ${s.unit}`.trim() : (s.last_display ? `last ${s.last_display} ${s.unit}`.trim() : '—');
+                if (reading) {
+                    reading.textContent = show && s.display
+                        ? `${s.display} ${s.display_unit || s.unit || ''}`.trim()
+                        : (s.last_display ? `last ${s.last_display} ${s.unit}`.trim() : '—');
+                }
             });
         });
     }

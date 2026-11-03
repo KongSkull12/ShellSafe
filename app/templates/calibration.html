@@ -83,7 +83,7 @@
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">Calibrate with your pH buffers</p>
-                    <p class="cal-step-text">Use the pH 4.01, 6.86, and 9.18 solutions you have. Rinse the probe between solutions and wait 1–2 minutes for each reading to settle. At least two buffers are required; all three provide the most accurate calibration.</p>
+                    <p class="cal-step-text">Use the pH 4.01, 6.86, and 9.18 solutions you have. Rinse with distilled water between buffers and wait 1–2 minutes until the Signal voltage stops changing before you press Calibrate. The voltage must move by at least about 100 mV between buffers; if it barely changes, the point is rejected. At least two buffers are required; all three are best.</p>
                 </div>
                 <div class="cal-step-actions">
                     {{ run_button('PH', 'Calibrate pH 4.01', value='4.01') }}
@@ -125,14 +125,14 @@
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">1. Clean water</p>
-                    <p class="cal-step-text">Put the probe in clear water so the gap between the prongs is filled. This sets 0 NTU. To suppress false readings when the turbidity probe is dry, keep the EC probe installed at the same depth; the turbidity probe alone cannot detect whether it is in air or water.</p>
+                    <p class="cal-step-text">Put both the turbidity and EC probes in clear water so the gaps are filled, with no air bubbles. This sets 0 NTU. While EC is dry, turbidity/pH/ORP show 0 like EC; put EC in water too so live readings return while you calibrate.</p>
                 </div>
                 <div class="cal-step-actions">{{ run_button('TURB0', 'Set 0 NTU') }}</div>
             </div>
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">2. Turbidity standard (optional)</p>
-                    <p class="cal-step-text">Sets the NTU scale. Without it, readings above 0 use an estimated scale.</p>
+                    <p class="cal-step-text">Required for accurate NTU in a standard. Put the probe in the bottled standard, wait until Signal falls below the clean-water voltage, then calibrate. Without this step, values above 0 NTU are only an estimate.</p>
                 </div>
                 <div class="cal-step-actions">
                     {{ value_field('calTurbValue', 'Standard', 100, 'NTU', 0.1, 4000) }}
