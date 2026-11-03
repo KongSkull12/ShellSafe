@@ -1,0 +1,351 @@
+{% extends "dashboard_base.html" %}
+
+{% block styles %}
+<style>
+    .fw-steps { display: grid; }
+    .fw-step { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--border); }
+    .fw-step:first-child { border-top: 0; padding-top: 2px; }
+    .fw-step-title { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+    .fw-step-num {
+        display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+        background: var(--surface-3); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums;
+    }
+    .fw-sources { display: grid; gap: 8px; }
+    .fw-source {
+        display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; align-items: start;
+        padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--r); cursor: pointer;
+        transition: border-color var(--duration-quick) var(--ease-smooth-out), background-color var(--duration-quick) var(--ease-smooth-out);
+    }
+    .fw-source:hover { background: var(--surface-2); }
+    .fw-source:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+    .fw-source input { margin-top: 3px; accent-color: var(--accent); }
+    .fw-source-meta { grid-column: 2; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .fw-file { height: auto; padding: 6px 8px; font-size: 13px; }
+    .fw-file[hidden] { display: none; }
+    .fw-image { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r); font-size: 13px; background: var(--surface-2); color: var(--text-2); }
+    .fw-image[data-kind="full"] { background: var(--warn-soft); color: var(--warn-text); }
+    .fw-image[data-kind="bad"] { background: var(--bad-soft); color: var(--bad-text); }
+    .fw-image i { margin-top: 1px; }
+    .fw-ack { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text-2); }
+    .fw-ack[hidden] { display: none; }
+    .fw-ack input { margin-top: 3px; accent-color: var(--accent); }
+    .fw-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .fw-progress { display: grid; gap: 6px; }
+    .fw-progress[hidden] { display: none; }
+    .fw-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+    .fw-bar span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width var(--duration-fast) var(--ease-smooth-out); }
+    .fw-progress[data-status="done"] .fw-bar span { background: var(--ok); }
+    .fw-progress[data-status="failed"] .fw-bar span { background: var(--bad); }
+    .fw-progress-text { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .fw-progress[data-status="done"] .fw-progress-text strong { color: var(--ok-text); }
+    .fw-progress[data-status="failed"] .fw-progress-text strong { color: var(--bad-text); }
+    .fw-log summary { cursor: pointer; font-size: 13px; color: var(--text-2); width: fit-content; }
+    .fw-log pre {
+        margin: 8px 0 0; padding: 10px 12px; max-height: 240px; overflow: auto; border-radius: var(--r);
+        background: var(--surface-2); border: 1px solid var(--border);
+        font: 12px/1.5 var(--font-mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .fw-checklist { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+    .fw-checklist li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; color: var(--text-2); font-size: 14px; }
+    .fw-checklist i { color: var(--text-3); margin-top: 2px; }
+    .fw-checklist strong { color: var(--text); font-weight: 500; }
+    .fw-unsupported { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r); background: var(--bad-soft); color: var(--bad-text); font-size: 13px; margin-bottom: 4px; }
+    .fw-unsupported[hidden] { display: none; }
+    code { font-family: var(--font-mono); font-size: 0.92em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Firmware</h1>
+        <p>Install new firmware on the ESP32 over USB, straight from this page. No Arduino IDE needed. Works in Chrome or Edge on a computer.</p>
+    </div>
+</div>
+
+<div class="split">
+    <section class="panel" aria-labelledby="flashTitle">
+        <div class="panel-head">
+            <h2 id="flashTitle">Flash the device</h2>
+            <span class="tag tag-plain" id="fwChip">Not connected</span>
+        </div>
+
+        <p class="fw-unsupported" id="fwUnsupported" hidden><i class="bi bi-x-circle-fill" aria-hidden="true"></i><span>This browser can't reach USB devices. Open this page in Chrome or Edge on a computer.</span></p>
+
+        <div class="fw-steps">
+            <div class="fw-step">
+                <p class="fw-step-title"><span class="fw-step-num">1</span>Choose the firmware</p>
+                <div class="fw-sources" role="radiogroup" aria-label="Firmware source">
+                    {% if build %}
+                    <label class="fw-source">
+                        <input type="radio" name="fwSource" value="build" checked>
+                        <span>Latest build on this server</span>
+                        <span class="fw-source-meta">
+                            {{ build.firmware or 'Unknown version' }}{% if build.app_size %} · {{ '{:,}'.format(build.app_size) }} bytes{% endif %}{% if build.built_at %} · built {{ build.built_at|localtime }}{% endif %}{% if build.commit %} · {{ build.commit }}{% endif %}
+                        </span>
+                    </label>
+                    {% endif %}
+                    <label class="fw-source">
+                        <input type="radio" name="fwSource" value="file" {% if not build %}checked{% endif %}>
+                        <span>A .bin file from this computer</span>
+                        <span class="fw-source-meta">Use <code>shellsafev2.ino.bin</code> to update, or <code>shellsafev2.ino.merged.bin</code> for a blank board.</span>
+                    </label>
+                    <input type="file" class="input fw-file" id="fwFile" aria-label="Firmware .bin file" accept=".bin,application/octet-stream" {% if build %}hidden{% endif %}>
+                </div>
+                {% if build and build.has_full %}
+                <label class="fw-ack" style="margin-top: 2px;">
+                    <input type="checkbox" id="fwUseFull">
+                    <span>Full install (bootloader + partitions + app). Only for a blank or broken board.</span>
+                </label>
+                {% endif %}
+                <p class="fw-image" id="fwImage" hidden></p>
+                <label class="fw-ack" id="fwAck" hidden>
+                    <input type="checkbox" id="fwAckBox">
+                    <span>I understand a full install erases the whole flash, including saved probe calibration.</span>
+                </label>
+            </div>
+
+            <div class="fw-step">
+                <p class="fw-step-title"><span class="fw-step-num">2</span>Connect and flash</p>
+                <p style="color: var(--text-2); font-size: 14px;">Plug the board in with a USB data cable, press <strong>Flash device</strong>, then pick its port (usually <code>USB-SERIAL CH340</code>, <code>CH9102</code> or <code>CP210x</code>).</p>
+                <div class="fw-actions">
+                    <button type="button" class="btn btn-primary" id="fwFlashBtn" disabled><i class="bi bi-lightning-charge" aria-hidden="true"></i> Flash device</button>
+                </div>
+                <div class="fw-progress" id="fwProgress" role="status" aria-live="polite" hidden>
+                    <div class="fw-bar"><span id="fwBar"></span></div>
+                    <div class="fw-progress-text"><strong id="fwStatus">Connecting…</strong><span id="fwPercent"></span></div>
+                </div>
+                <details class="fw-log" id="fwLogWrap" hidden>
+                    <summary>Show log</summary>
+                    <pre id="fwLog"></pre>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="tipsTitle">
+        <div class="panel-head">
+            <h2 id="tipsTitle">Before you start</h2>
+        </div>
+        <ul class="fw-checklist">
+            <li><i class="bi bi-x-octagon" aria-hidden="true"></i><span><strong>Close Arduino IDE's Serial Monitor</strong> and any other app using the port. Only one program can hold it.</span></li>
+            <li><i class="bi bi-hand-index" aria-hidden="true"></i><span><strong>If it says "wrong boot mode"</strong>, hold the board's <strong>BOOT</strong> button, tap <strong>RST/EN</strong>, release BOOT, then press Flash again.</span></li>
+            <li><i class="bi bi-shield-check" aria-hidden="true"></i><span><strong>An update keeps calibration.</strong> It only replaces the app, so saved pH, EC and turbidity calibration stays on the device.</span></li>
+            <li><i class="bi bi-plug" aria-hidden="true"></i><span><strong>Don't unplug while flashing.</strong> If it's interrupted, just flash again. The board can always be recovered over USB.</span></li>
+        </ul>
+        <p class="panel-note">Build a new <code>.bin</code> with <code>python build_firmware.py</code> on the computer that has <code>secrets.h</code>. The file contains your WiFi and Firebase credentials, so don't share it or commit it.</p>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script type="module">
+import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.6.1/bundle.js';
+
+const APP_ADDRESS = 0x10000;
+const APP_MAX = 0x140000;          // 1.25 MB app slot in the default 4 MB partition table
+const IMAGE_MAGIC = 0xE9;
+const BAUD = 460800;
+const BUILD_URLS = {
+    app: {{ url_for('main.firmware_download', kind='app')|tojson }},
+    full: {{ url_for('main.firmware_download', kind='full')|tojson }},
+};
+
+const $ = (id) => document.getElementById(id);
+const btn = $('fwFlashBtn');
+const fileInput = $('fwFile');
+const useFull = $('fwUseFull');
+const imageBox = $('fwImage');
+const ack = $('fwAck');
+const ackBox = $('fwAckBox');
+const chipTag = $('fwChip');
+const progress = $('fwProgress');
+const bar = $('fwBar');
+const statusText = $('fwStatus');
+const percentText = $('fwPercent');
+const logWrap = $('fwLogWrap');
+const logEl = $('fwLog');
+
+const supported = 'serial' in navigator;
+let image = null;      // { data, address, kind, name }
+let busy = false;
+
+if (!supported) $('fwUnsupported').hidden = false;
+
+function source() {
+    const picked = document.querySelector('input[name="fwSource"]:checked');
+    return picked ? picked.value : 'file';
+}
+
+// An app image starts with the ESP magic byte; a merged image has the
+// bootloader's magic at 0x1000 (ESP32) with 0xFF padding before it.
+function inspect(data) {
+    if (data.length > 24 && data[0] === IMAGE_MAGIC) {
+        if (data.length > APP_MAX) return { error: `This app is ${data.length.toLocaleString()} bytes, larger than the 1.25 MB app slot.` };
+        return { kind: 'app', address: APP_ADDRESS, chipId: data[12] | (data[13] << 8) };
+    }
+    if (data.length > 0x1000 + 24 && data[0x1000] === IMAGE_MAGIC) {
+        // The bootloader header's chip id isn't reliable; read the app inside instead.
+        const app = APP_ADDRESS;
+        const chipId = data.length > app + 24 && data[app] === IMAGE_MAGIC ? data[app + 12] | (data[app + 13] << 8) : null;
+        return { kind: 'full', address: 0x0, chipId };
+    }
+    return { error: "This isn't an ESP32 firmware image. Pick shellsafev2.ino.bin or shellsafev2.ino.merged.bin." };
+}
+
+function showImage(info, name, size) {
+    imageBox.hidden = false;
+    if (info.error) {
+        imageBox.dataset.kind = 'bad';
+        imageBox.innerHTML = '<i class="bi bi-x-circle-fill" aria-hidden="true"></i><span></span>';
+        imageBox.lastChild.textContent = info.error;
+    } else if (info.kind === 'full') {
+        imageBox.dataset.kind = 'full';
+        imageBox.innerHTML = '<i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i><span></span>';
+        imageBox.lastChild.textContent = `${name}: full install, ${size.toLocaleString()} bytes written from address 0x0. Erases saved calibration and settings.`;
+    } else {
+        imageBox.dataset.kind = 'app';
+        imageBox.innerHTML = '<i class="bi bi-check-circle" aria-hidden="true"></i><span></span>';
+        imageBox.lastChild.textContent = `${name}: app update, ${size.toLocaleString()} bytes written to 0x10000. Calibration is kept.`;
+    }
+    ack.hidden = !(info.kind === 'full');
+    if (ack.hidden) ackBox.checked = false;
+}
+
+function refresh() {
+    const ready = supported && !busy && image && (image.kind !== 'full' || ackBox.checked);
+    btn.disabled = !ready;
+}
+
+async function loadBuild() {
+    const kind = useFull && useFull.checked ? 'full' : 'app';
+    image = null;
+    imageBox.hidden = true;
+    refresh();
+    try {
+        const res = await fetch(BUILD_URLS[kind], { cache: 'no-store' });
+        if (!res.ok) throw new Error(`The server build could not be loaded (${res.status}).`);
+        const data = new Uint8Array(await res.arrayBuffer());
+        const info = inspect(data);
+        showImage(info, kind === 'full' ? 'shellsafev2.ino.merged.bin' : 'shellsafev2.ino.bin', data.length);
+        if (!info.error) image = { data, ...info };
+    } catch (err) {
+        showImage({ error: err.message });
+    }
+    refresh();
+}
+
+async function loadFile() {
+    image = null;
+    imageBox.hidden = true;
+    const file = fileInput.files && fileInput.files[0];
+    if (file) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const info = inspect(data);
+        showImage(info, file.name, data.length);
+        if (!info.error) image = { data, ...info };
+    } else {
+        ack.hidden = true;
+    }
+    refresh();
+}
+
+function onSourceChange() {
+    const s = source();
+    fileInput.hidden = s !== 'file';
+    if (useFull) useFull.closest('label').hidden = s !== 'build';
+    if (s === 'build') loadBuild(); else loadFile();
+}
+
+const terminal = {
+    clean() { logEl.textContent = ''; },
+    writeLine(data) { logEl.textContent += data + '\n'; logEl.scrollTop = logEl.scrollHeight; },
+    write(data) { logEl.textContent += data; logEl.scrollTop = logEl.scrollHeight; },
+};
+
+function setProgress(status, text, pct) {
+    progress.hidden = false;
+    progress.dataset.status = status;
+    statusText.textContent = text;
+    percentText.textContent = pct == null ? '' : `${pct}%`;
+    if (pct != null) bar.style.width = `${pct}%`;
+}
+
+function friendlyError(err) {
+    const msg = String(err && err.message || err);
+    if (/No port selected|requestPort/i.test(msg) || (err && err.name === 'NotFoundError')) return 'No port was selected.';
+    if (/Failed to open|already open|Access denied|NetworkError/i.test(msg)) return 'The port is busy. Close Arduino IDE / Serial Monitor and try again.';
+    if (/boot mode|Failed to connect|Timeout|timed out/i.test(msg)) return 'The board did not enter download mode. Hold BOOT, tap RST/EN, release BOOT, then try again.';
+    return msg;
+}
+
+async function flash() {
+    if (!image || busy) return;
+    busy = true;
+    refresh();
+    terminal.clean();
+    logWrap.hidden = false;
+    bar.style.width = '0%';
+
+    let port;
+    try {
+        port = await navigator.serial.requestPort();
+    } catch (err) {
+        busy = false;
+        refresh();
+        if (err && err.name !== 'NotFoundError') setProgress('failed', friendlyError(err), null);
+        return;
+    }
+
+    const transport = new Transport(port, false);
+    let connected = false;
+    try {
+        setProgress('running', 'Connecting to the board…', null);
+        const loader = new ESPLoader({ transport, baudrate: BAUD, terminal, debugLogging: false });
+        const chipName = await loader.main();
+        connected = true;
+        chipTag.textContent = chipName;
+        chipTag.className = 'tag tag-ok';
+
+        if (image.chipId != null && loader.chip.IMAGE_CHIP_ID !== image.chipId) {
+            throw new Error(`This firmware was built for a different chip than the connected ${chipName}.`);
+        }
+
+        setProgress('running', 'Writing firmware…', 0);
+        await loader.writeFlash({
+            fileArray: [{ data: image.data, address: image.address }],
+            flashMode: 'keep',
+            flashFreq: 'keep',
+            flashSize: 'keep',
+            eraseAll: false,
+            compress: true,
+            reportProgress(_i, written, total) {
+                const pct = Math.min(100, Math.floor((written / total) * 100));
+                setProgress('running', pct < 100 ? 'Writing firmware…' : 'Verifying…', pct);
+            },
+            calculateMD5Hash: (data) => CryptoJS.MD5(CryptoJS.lib.WordArray.create(data)).toString(),
+        });
+
+        setProgress('running', 'Restarting the board…', 100);
+        await loader.after('hard_reset');
+        setProgress('done', 'Done. The board restarted with the new firmware.', 100);
+    } catch (err) {
+        terminal.writeLine(`Error: ${err && err.message || err}`);
+        setProgress('failed', friendlyError(err), null);
+        if (!connected) { chipTag.textContent = 'Not connected'; chipTag.className = 'tag tag-plain'; }
+    } finally {
+        try { await transport.disconnect(); } catch (_) { /* already closed */ }
+        busy = false;
+        refresh();
+    }
+}
+
+document.querySelectorAll('input[name="fwSource"]').forEach((el) => el.addEventListener('change', onSourceChange));
+fileInput.addEventListener('change', loadFile);
+if (useFull) useFull.addEventListener('change', loadBuild);
+ackBox.addEventListener('change', refresh);
+btn.addEventListener('click', flash);
+onSourceChange();
+</script>
+{% endblock %}

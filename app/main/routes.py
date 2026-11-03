@@ -1,4 +1,4 @@
-from flask import render_template, redirect, url_for, flash, jsonify, Response, stream_with_context, request
+from flask import render_template, redirect, url_for, flash, jsonify, Response, stream_with_context, request, send_file, abort
 from flask_login import login_required, current_user
 from app.main import bp
 from functools import wraps
@@ -6,6 +6,7 @@ from app.models import Alert, Report
 from app.firestore_service import get_firestore_service
 from app.alert_helpers import normalize_alerts
 from app.ml_service import load_metrics
+from app.firmware_build import latest_build, build_file
 from app.realtime_db_service import (
     get_history,
     get_live_history,
@@ -339,6 +340,24 @@ def calibration_run():
 @role_required('admin')
 def calibration_status():
     return jsonify({'ok': True, 'calibration': get_calibration_status()})
+
+
+@bp.route('/settings/firmware')
+@login_required
+@role_required('admin')
+def firmware_settings():
+    """Flash the ESP32 over USB from the browser (Web Serial)."""
+    return render_template('firmware.html', title='Firmware', build=latest_build())
+
+
+@bp.route('/settings/firmware/<kind>.bin')
+@login_required
+@role_required('admin')
+def firmware_download(kind):
+    path = build_file(kind)
+    if path is None:
+        abort(404)
+    return send_file(path, mimetype='application/octet-stream', max_age=0)
 
 
 @bp.route('/settings/thresholds', methods=['GET', 'POST'])
