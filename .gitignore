@@ -77,3 +77,10 @@ migrations/
 app.db
 data/
 .env.local
+
+# Local firmware artifacts (binaries embed secrets.h)
+shellsafev2.bin
+*.ino.bin
+*.merged.bin
+firmware/libs/
+firmware/build/

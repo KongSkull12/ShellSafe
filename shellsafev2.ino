@@ -181,12 +181,6 @@ bool turbidityConnected = false;
 bool orpConnected = false;
 bool ecConnected = false;
 bool ecDry = false;   // EC board present but probe out of the water
-// pH, turbidity and ORP cannot tell air from water on their own. They are
-// mounted at the same depth as the EC probe, so when EC is dry they report
-// 0 (like EC) and resume automatic readings as soon as EC is wet again.
-bool phDry = false;
-bool turbidityDry = false;
-bool orpDry = false;
 
 // ============================================================
 // SENSOR VOLTAGES
@@ -1881,12 +1875,12 @@ String alertLines()
 {
     String alertMsg = "";
 
-    if (phConnected && !phDry && phCalibrated() && (currentPH < ALERT_PH_MIN || currentPH > ALERT_PH_MAX))
+    if (phConnected && phCalibrated() && (currentPH < ALERT_PH_MIN || currentPH > ALERT_PH_MAX))
     {
         alertMsg += " pH=";
         alertMsg += String(currentPH, 2);
     }
-    if (turbidityConnected && !turbidityDry && turbidityCalibrated && currentTurbidity > ALERT_TURBIDITY_MAX)
+    if (turbidityConnected && turbidityCalibrated && currentTurbidity > ALERT_TURBIDITY_MAX)
     {
         alertMsg += " Turb=";
         alertMsg += String(currentTurbidity, 1);
@@ -1898,7 +1892,7 @@ String alertLines()
         alertMsg += String(currentTemperature, 1);
         alertMsg += "C";
     }
-    if (orpConnected && !orpDry && orpCalibrated && currentORP < ALERT_ORP_MIN)
+    if (orpConnected && orpCalibrated && currentORP < ALERT_ORP_MIN)
     {
         alertMsg += " ORP=";
         alertMsg += String(currentORP, 1);
@@ -1993,19 +1987,16 @@ void sendDataToFirebase()
         jsonDoc["pH"] = roundf(currentPH * 100.0f) / 100.0f;
     else
         jsonDoc["pH"] = "Disconnected";
-    jsonDoc["ph_dry"] = phDry;
 
     if (turbidityConnected)
         jsonDoc["turbidity_NTU"] = roundf(currentTurbidity * 10.0f) / 10.0f;
     else
         jsonDoc["turbidity_NTU"] = "Disconnected";
-    jsonDoc["turbidity_dry"] = turbidityDry;
 
     if (orpConnected)
         jsonDoc["ORP_mV"] = roundf(currentORP * 10.0f) / 10.0f;
     else
         jsonDoc["ORP_mV"] = "Disconnected";
-    jsonDoc["orp_dry"] = orpDry;
 
     if (ecConnected)
         jsonDoc["EC_uS_cm"] = roundf(currentEC * 10.0f) / 10.0f;
@@ -2132,10 +2123,10 @@ void pushReadingLog()
     JsonObject ts = doc.createNestedObject("t");
     ts[".sv"] = "timestamp";
     if (tempSensorFound) doc["temperature"] = roundf(currentTemperature * 100.0f) / 100.0f;
-    // Dry zeros are not water readings; leave them out of the training log.
-    if (phConnected && !phDry) doc["ph"] = roundf(currentPH * 100.0f) / 100.0f;
-    if (turbidityConnected && !turbidityDry) doc["turbidity"] = roundf(currentTurbidity * 10.0f) / 10.0f;
-    if (orpConnected && !orpDry) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
+    if (phConnected) doc["ph"] = roundf(currentPH * 100.0f) / 100.0f;
+    if (turbidityConnected) doc["turbidity"] = roundf(currentTurbidity * 10.0f) / 10.0f;
+    if (orpConnected) doc["orp"] = roundf(currentORP * 10.0f) / 10.0f;
+    // EC dry zeros are not water readings; leave them out of the training log.
     if (ecConnected && !ecDry) doc["ec"] = roundf(currentEC * 10.0f) / 10.0f;
     if (salinityValid) doc["salinity"] = roundf(currentSalinity * 100.0f) / 100.0f;
     if (doInstalled && !isnan(currentDO)) doc["do"] = roundf(currentDO * 100.0f) / 100.0f;
@@ -2377,16 +2368,6 @@ void readAllSensors()
     currentDO = readDissolvedOxygenMgL();
     currentNH3 = readAmmoniaMgL();
 
-    // Same dry behaviour as EC: when the EC probe is in air, the other three
-    // water probes report 0. As soon as EC is wet again, their live values
-    // come back automatically from the reads above.
-    phDry = turbidityDry = orpDry = false;
-    if (ecConnected && ecDry)
-    {
-        if (phConnected) { currentPH = 0.0f; phDry = true; }
-        if (turbidityConnected) { currentTurbidity = 0.0f; turbidityDry = true; }
-        if (orpConnected) { currentORP = 0.0f; orpDry = true; }
-    }
     updateSalinity();
 
     Serial.println();
@@ -2399,18 +2380,15 @@ void readAllSensors()
     else Serial.println("DISCONNECTED");
 
     Serial.print("pH          : ");
-    if (phConnected && phDry) Serial.println("0.00  (probe dry / in air)");
-    else if (phConnected) { Serial.print(currentPH, 2); Serial.println(phCalibrated() ? "" : "  (NOT CALIBRATED)"); }
+    if (phConnected) { Serial.print(currentPH, 2); Serial.println(phCalibrated() ? "" : "  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("Turbidity   : ");
-    if (turbidityConnected && turbidityDry) Serial.println("0.0 NTU  (probe dry / in air)");
-    else if (turbidityConnected) { Serial.print(currentTurbidity, 1); Serial.println(turbidityCalibrated ? " NTU" : " NTU  (NOT CALIBRATED)"); }
+    if (turbidityConnected) { Serial.print(currentTurbidity, 1); Serial.println(turbidityCalibrated ? " NTU" : " NTU  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("ORP         : ");
-    if (orpConnected && orpDry) Serial.println("0.0 mV  (probe dry / in air)");
-    else if (orpConnected) { Serial.print(currentORP, 1); Serial.println(orpCalibrated ? " mV" : " mV  (NOT CALIBRATED)"); }
+    if (orpConnected) { Serial.print(currentORP, 1); Serial.println(orpCalibrated ? " mV" : " mV  (NOT CALIBRATED)"); }
     else Serial.println("DISCONNECTED");
 
     Serial.print("EC          : ");

@@ -124,16 +124,10 @@ def assess_bloom_risk(sensor_data: Optional[Dict]) -> Dict:
     parameters = []
     calibrated = sensor_data.get('calibrated') or {}
     dry_flags = {
-        'ph': 'ph_dry',
-        'turbidity': 'turbidity_dry',
-        'orp': 'orp_dry',
         'ec': 'ec_dry',
     }
     for key in SENSOR_ORDER:
-        dry = bool(
-            sensor_data.get(dry_flags.get(key))
-            or (key == 'turbidity' and sensor_data.get('turbidity_out_of_water'))
-        )
+        dry = bool(sensor_data.get(dry_flags.get(key)))
         connected = _sensor_connected(sensor_data, key)
         if dry and connected:
             parameters.append({

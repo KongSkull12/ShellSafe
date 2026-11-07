@@ -37,9 +37,6 @@ STATE_LABELS = {
 }
 
 _DRY_FLAGS = {
-    'ph': 'ph_dry',
-    'turbidity': 'turbidity_dry',
-    'orp': 'orp_dry',
     'ec': 'ec_dry',
 }
 
@@ -65,13 +62,10 @@ def build_sensor_cards(reading: Optional[Dict], risk: Dict) -> List[Dict]:
         connected = bool(reading.get(flag)) if reading else False
 
         dry_flag = _DRY_FLAGS.get(key)
-        is_dry = bool(
-            dry_flag and (reading or {}).get(dry_flag)
-            or (key == 'turbidity' and (reading or {}).get('turbidity_out_of_water'))
-        )
+        is_dry = bool(dry_flag and (reading or {}).get(dry_flag))
         if link_state == 'live':
             state = 'live' if connected and value is not None else 'unplugged'
-            # Same as EC: dry probes stay connected and show 0.
+            # EC can report dry (probe in air) while staying connected; show 0.
             if is_dry and connected:
                 state = 'dry'
                 value = 0.0
