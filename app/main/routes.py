@@ -28,6 +28,7 @@ from app.threshold_service import (
 )
 from datetime import datetime
 import json
+import os
 import time
 
 def role_required(role):
@@ -400,7 +401,15 @@ def api_sensor_data():
 @bp.route('/api/sensor-stream')
 @login_required
 def api_sensor_stream():
-    """Push sensor updates when Firebase data changes (throttled)."""
+    """Push sensor updates when Firebase data changes (throttled).
+
+    Disabled on Vercel: serverless functions cannot hold SSE open, and the
+    infinite loop was exhausting the Function until the 300s timeout (500s).
+    Clients fall back to /api/sensor-data polling via live.js.
+    """
+    if os.environ.get('VERCEL') == '1':
+        return Response(status=204)
+
     @stream_with_context
     def generate():
         last_key = object()

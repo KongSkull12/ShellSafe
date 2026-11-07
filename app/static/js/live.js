@@ -17,6 +17,7 @@
     let pollTimer = null;
     let retryTimer = null;
     let serverReachable = true;
+    let streamDisabled = false;
 
     const LINK_LABELS = { live: 'Live', offline: 'Offline', checking: 'Connecting', nodata: 'No data' };
     const RISK_ICONS = { normal: 'bi-check-lg', warning: 'bi-exclamation-lg', high: 'bi-exclamation-triangle' };
@@ -284,7 +285,10 @@
 
     function connect() {
         closeStream();
-        if (!streamUrl || typeof EventSource === 'undefined') { startPolling(); return; }
+        if (streamDisabled || !streamUrl || typeof EventSource === 'undefined') {
+            startPolling();
+            return;
+        }
         stream = new EventSource(streamUrl);
         stream.onmessage = function (event) {
             stopPolling();
@@ -292,9 +296,11 @@
             try { apply(JSON.parse(event.data)); } catch (err) { /* ignore malformed frame */ }
         };
         stream.onerror = function () {
+            // On Vercel the stream returns 204; keep polling and do not reopen
+            // SSE (each attempt would pin a Function until the 300s timeout).
+            streamDisabled = true;
             closeStream();
             startPolling();
-            retryTimer = setTimeout(connect, STREAM_RETRY_MS);
         };
     }
 
