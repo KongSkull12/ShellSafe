@@ -303,22 +303,30 @@ PhPoint phAlk     = {9.18f, 0.0f, false};
 // Turbidity: clean water sets 0 NTU. Most boards fall in voltage as water
 // gets cloudier; some clones rise instead. TURB calibration stores a signed
 // V/NTU so either polarity works. Until a standard is used, the slope assumes
-// a 12% drop = 1000 NTU (falling curve).
+// a 12% drop = 1000 NTU (falling curve) but the opposite side is still
+// estimated so rising clones are not stuck at 0 NTU after TURB0 only.
 float turbidityClearVoltage = 0.966f;
 float turbidityVoltsPerNtu = 0.116f / 1000.0f;
 float turbidityMaxNtu = 1000.0f;
-const float TURBIDITY_MIN_SPAN_V = 0.030f;  // need this much change for TURB
+const float TURBIDITY_MIN_SPAN_V = 0.025f;  // need this much change for TURB
+const float TURBIDITY_ZERO_BAND_V = 0.015f; // |delta| inside this band = 0 NTU
 bool turbidityCalibrated = false;
+bool turbidityScaleSet = false;            // true after CAL TURB <ntu>
 
 // ORP: pin millivolts plus an offset set from a reference solution.
 float orpCalibrationOffset = 0.0f;
 bool orpCalibrated = false;
 
-// EC: dry-probe zero voltage is subtracted first, then a multiplier set
-// from a conductivity standard is applied.
+// EC: dry-probe air voltage is the "in air" floor. Wet readings use the
+// absolute board voltage with DFRobot_EC (not V - Vdry), then a multiplier
+// from a conductivity standard. Subtracting dry zero ate the whole span on
+// weak probes (~0.15–0.35 V wet) and made solution look like air.
 float ecZeroVoltage = 0.0f;
 float ecCalibrationK = 1.0f;
 bool ecCalibrated = false;
+const float EC_DRY_MARGIN_V = 0.020f;   // within 20 mV of dry zero → 0 uS/cm
+const float EC_MIN_WET_SPAN_V = 0.040f; // cal needs at least this above dry
+const float EC0_MAX_DRY_V = 0.55f;      // refuse EC0 if probe still looks wet
 
 int phPointCount() { return (int)phAcid.set + (int)phNeutral.set + (int)phAlk.set; }
 
@@ -1320,10 +1328,20 @@ float phFromVoltage(float v)
 float turbidityFromVoltage(float v)
 {
     if (fabsf(turbidityVoltsPerNtu) < 1e-9f) return 0.0f;
-    // Signed slope: falling sensors have positive V/NTU, rising clones negative.
-    // Values on the "clearer than zero" side clamp to 0 NTU.
-    float ntu = (turbidityClearVoltage - v) / turbidityVoltsPerNtu;
-    if (ntu < 0.0f) return 0.0f;
+    float delta = turbidityClearVoltage - v;  // + if voltage fell (classic)
+    if (fabsf(delta) <= TURBIDITY_ZERO_BAND_V) return 0.0f;
+    // Signed slope after TURB: falling → positive V/NTU, rising → negative.
+    float ntu = delta / turbidityVoltsPerNtu;
+    if (ntu < 0.0f)
+    {
+        // Wrong side of the saved slope. After TURB0 only (provisional falling
+        // estimate), still show NTU for rising clones so readings are not stuck
+        // at 0 until a standard is used. After TURB, clamp clearer-than-zero to 0.
+        if (!turbidityScaleSet)
+            ntu = fabsf(delta) / fabsf(turbidityVoltsPerNtu);
+        else
+            return 0.0f;
+    }
     return constrain(ntu, 0.0f, turbidityMaxNtu);
 }
 
@@ -1332,15 +1350,14 @@ float orpFromVoltage(float v)
     return v * 1000.0f + orpCalibrationOffset;
 }
 
-// Uncorrected EC in uS/cm (before ecCalibrationK), after removing the
-// dry-probe zero voltage.
+// Uncorrected EC in uS/cm (before ecCalibrationK). Dry zero is only a
+// threshold for "probe in air"; DFRobot_EC expects the absolute board mV.
 float ecFromVoltage(float v)
 {
-    float net = v - ecZeroVoltage;
-    if (net <= 0.0f) return 0.0f;
+    if (v <= ecZeroVoltage + EC_DRY_MARGIN_V) return 0.0f;
     float tempForEC = (tempSensorFound && currentTemperature > 0)
                       ? currentTemperature : 25.0f;
-    return ec.readEC(net * 1000.0f, tempForEC) * 1000.0f;   // DFRobot_EC returns mS/cm.
+    return ec.readEC(v * 1000.0f, tempForEC) * 1000.0f;   // DFRobot_EC returns mS/cm.
 }
 
 // DFRobot_EC compensates to 25 C at 1.85 %/C. PSS-78 wants the in-situ
@@ -1447,13 +1464,31 @@ void loadCalibration()
     turbidityCalibrated = calPrefs.getBool("turb", false);
     turbidityClearVoltage = calPrefs.getFloat("turb_v0", turbidityClearVoltage);
     turbidityVoltsPerNtu = calPrefs.getFloat("turb_vpn", turbidityVoltsPerNtu);
+    if (calPrefs.isKey("turb_sc"))
+        turbidityScaleSet = calPrefs.getBool("turb_sc", false);
+    else
+    {
+        // Pre-flag builds: assume TURB was run when the slope is not the
+        // TURB0 provisional estimate (12% of clear-water V per 1000 NTU).
+        float provisional = (turbidityClearVoltage * 0.12f) / 1000.0f;
+        turbidityScaleSet = turbidityCalibrated &&
+                            fabsf(turbidityVoltsPerNtu - provisional) > 1e-6f;
+    }
     orpCalibrated = calPrefs.getBool("orp", false);
     orpCalibrationOffset = calPrefs.getFloat("orp_off", orpCalibrationOffset);
     ecCalibrated = calPrefs.getBool("ec", false);
     ecCalibrationK = calPrefs.getFloat("ec_k", ecCalibrationK);
     ecZeroVoltage = calPrefs.getFloat("ec_v0", ecZeroVoltage);
+    // Older firmware fed (V - Vdry) into DFRobot_EC; K values from that era
+    // are not valid for absolute mV. Force a fresh standard calibration once.
+    bool migrateEc = !calPrefs.getBool("ec_abs", false);
+    if (migrateEc && ecCalibrated)
+    {
+        ecCalibrated = false;
+        Serial.println("EC K cleared — re-calibrate in the conductivity standard (absolute voltage).");
+    }
     calPrefs.end();
-    if (dropBadPh) saveCalibration();
+    if (dropBadPh || migrateEc) saveCalibration();
 }
 
 void saveCalibration()
@@ -1472,11 +1507,13 @@ void saveCalibration()
     calPrefs.putBool("turb", turbidityCalibrated);
     calPrefs.putFloat("turb_v0", turbidityClearVoltage);
     calPrefs.putFloat("turb_vpn", turbidityVoltsPerNtu);
+    calPrefs.putBool("turb_sc", turbidityScaleSet);
     calPrefs.putBool("orp", orpCalibrated);
     calPrefs.putFloat("orp_off", orpCalibrationOffset);
     calPrefs.putBool("ec", ecCalibrated);
     calPrefs.putFloat("ec_k", ecCalibrationK);
     calPrefs.putFloat("ec_v0", ecZeroVoltage);
+    calPrefs.putBool("ec_abs", true);
     calPrefs.end();
 }
 
@@ -1645,6 +1682,7 @@ bool handleCalibrationCommand(String cmd)
         // Estimated scale only until a turbidity standard is used. Prefer
         // CAL TURB <ntu> for accurate readings in solutions.
         turbidityVoltsPerNtu = (v * 0.12f) / 1000.0f;
+        turbidityScaleSet = false;
         turbidityCalibrated = true;
         calDetail = String("Clean water set as 0 NTU at ") + String(v, 3) +
                     " V. For accurate NTU in a standard, run CAL TURB next.";
@@ -1664,6 +1702,7 @@ bool handleCalibrationCommand(String cmd)
             return false;
         }
         turbidityVoltsPerNtu = drop / value;
+        turbidityScaleSet = true;
         float check = turbidityFromVoltage(v);
         calDetail = String("Turbidity scale set from the ") + String(value, 1) +
                     " NTU standard (" + String(v, 3) + " V, " +
@@ -1681,20 +1720,53 @@ bool handleCalibrationCommand(String cmd)
     else if (what == "EC0")
     {
         if (!sampleRawVoltage(EC_SENSOR_PIN, v)) return false;
+        if (v > EC0_MAX_DRY_V)
+        {
+            calSay(String("CAL FAILED: signal is ") + String(v, 3) +
+                   " V — that looks like the probe is still wet or in solution. "
+                   "Rinse, blot dry, hold in air, then Set dry zero again.");
+            return false;
+        }
         ecZeroVoltage = v;
+        if (ecCalibrated)
+        {
+            ecCalibrated = false;
+            Serial.println("EC K cleared after new dry zero — re-calibrate in the standard.");
+        }
         Serial.printf("EC dry zero set to %.3f V.\n", v);
-        calDetail = String("EC dry zero set to ") + String(v, 3) + " V." +
-                    (ecCalibrated ? " Now calibrate again in the conductivity standard." : "");
+        calDetail = String("EC dry zero set to ") + String(v, 3) +
+                    " V. Next: put the probe in the conductivity standard and Calibrate EC.";
     }
     else if (what == "EC")
     {
         if (value <= 0.0f) { calSay("Usage: CAL EC <uS/cm of the standard>, e.g. CAL EC 12880"); return false; }
-        if (!sampleProbeVoltage(ecProbe, v)) return false;
+        // Probe often needs a few seconds after submersion before voltage rises.
+        bool risen = false;
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            if (!sampleProbeVoltage(ecProbe, v)) return false;
+            if (v > ecZeroVoltage + EC_MIN_WET_SPAN_V) { risen = true; break; }
+            delay(500);
+        }
+        if (!risen)
+        {
+            calSay(String("CAL FAILED: signal stayed at ") + String(v, 3) +
+                   " V (dry zero " + String(ecZeroVoltage, 3) +
+                   " V). Submerge both electrodes fully in the standard, or re-do "
+                   "Set dry zero with the probe rinsed and held in air (not in solution).");
+            return false;
+        }
         float raw = ecFromVoltage(v);
-        if (raw <= 0.0f) { calSay("CAL FAILED: EC reading is zero. Is the probe in the standard?"); return false; }
+        if (raw <= 0.0f)
+        {
+            calSay(String("CAL FAILED: EC still reads zero at ") + String(v, 3) +
+                   " V. Check the EC board VCC/GND/signal on GPIO32 and the BNC probe.");
+            return false;
+        }
         ecCalibrationK = value / raw;
         ecCalibrated = true;
-        calDetail = String("EC set to ") + String(value, 0) + " uS/cm (K " + String(ecCalibrationK, 3) + ").";
+        calDetail = String("EC set to ") + String(value, 0) + " uS/cm at " +
+                    String(v, 3) + " V (K " + String(ecCalibrationK, 3) + ").";
     }
     else if (what == "TEMP")
     {
@@ -1861,6 +1933,14 @@ float readEC()
     if (!ecConnected) return 0.0f;
     if (!good) return currentEC;
     lastEcVoltage = ecProbe.voltage;
+
+    // Near the saved air voltage → treat as dry even if the pin is above minV.
+    if (lastEcVoltage <= ecZeroVoltage + EC_DRY_MARGIN_V)
+    {
+        ecDry = true;
+        ecProbe.reason = "dry - signal at air zero (0 uS/cm)";
+        return 0.0f;
+    }
 
     return ecFromVoltage(lastEcVoltage) * ecCalibrationK;
 }
@@ -2503,7 +2583,7 @@ void setup()
     Serial.println("#          SHELLSAFE SYSTEM            #");
     Serial.println("#                                      #");
     Serial.println("# ESP32-WROVER-E T-CALL A7670 V1.0    #");
-    Serial.println("# Firmware: v5.1 (web calibration)     #");
+    Serial.println("# Firmware: v5.2 (EC abs / turb polar) #");
     Serial.println("#                                      #");
     Serial.println("# A7670 = SMS + GPS + LTE backup       #");
     Serial.println("# WiFi  = Firebase (primary)           #");

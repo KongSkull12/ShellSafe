@@ -100,15 +100,15 @@
         <div class="cal-steps">
             <div class="cal-step">
                 <div>
-                    <p class="cal-step-title">1. Dry zero (optional)</p>
-                    <p class="cal-step-text">Rinse and dry the probe and hold it in the air. Only needed if the signal in air is above about 0.02 V.</p>
+                    <p class="cal-step-title">1. Dry zero</p>
+                    <p class="cal-step-text">Rinse the probe, blot it dry, and hold it in air (not in water). Signal should stay low. If Signal later equals this saved dry-zero voltage while the probe is in solution, you set dry zero while wet — redo this step in air.</p>
                 </div>
                 <div class="cal-step-actions">{{ run_button('EC0', 'Set dry zero', quiet=True) }}</div>
             </div>
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">2. Conductivity standard</p>
-                    <p class="cal-step-text">Put the probe in the standard and wait until the reading stops changing. Enter the value printed on the bottle.</p>
+                    <p class="cal-step-text">Put both electrodes fully in the standard. Wait until Signal rises clearly above the dry-zero voltage (often 0.3–2 V depending on the board), then calibrate. Enter the value printed on the bottle (e.g. 12880).</p>
                 </div>
                 <div class="cal-step-actions">
                     {{ value_field('calEcValue', 'Standard', 12880, 'µS/cm', 1, 200000) }}
@@ -125,7 +125,7 @@
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">1. Clean water</p>
-                    <p class="cal-step-text">Put the turbidity probe in clear water so the gap between the prongs is filled, with no air bubbles. Press Set 0 NTU. If live Signal later sits above this saved voltage and NTU stays at 0, re-run this step in fresh clear water first.</p>
+                    <p class="cal-step-text">Put the turbidity probe in clear water so the gap between the prongs is filled, with no air bubbles. Press Set 0 NTU. Some boards fall in voltage as water gets cloudy; others rise — both are fine after you run Calibrate scale.</p>
                 </div>
                 <div class="cal-step-actions">{{ run_button('TURB0', 'Set 0 NTU') }}</div>
             </div>
