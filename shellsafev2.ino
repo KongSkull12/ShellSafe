@@ -300,13 +300,14 @@ PhPoint phAcid    = {4.01f, 0.0f, false};
 PhPoint phNeutral = {6.86f, 0.0f, false};
 PhPoint phAlk     = {9.18f, 0.0f, false};
 
-// Turbidity: clean water sets 0 NTU; voltage falls as water gets cloudier.
-// Without a second standard the slope assumes a 12% drop = 1000 NTU,
-// the same ratio the original constants used.
+// Turbidity: clean water sets 0 NTU. Most boards fall in voltage as water
+// gets cloudier; some clones rise instead. TURB calibration stores a signed
+// V/NTU so either polarity works. Until a standard is used, the slope assumes
+// a 12% drop = 1000 NTU (falling curve).
 float turbidityClearVoltage = 0.966f;
 float turbidityVoltsPerNtu = 0.116f / 1000.0f;
 float turbidityMaxNtu = 1000.0f;
-const float TURBIDITY_ZERO_BAND = 0.030f;
+const float TURBIDITY_MIN_SPAN_V = 0.030f;  // need this much change for TURB
 bool turbidityCalibrated = false;
 
 // ORP: pin millivolts plus an offset set from a reference solution.
@@ -1318,9 +1319,11 @@ float phFromVoltage(float v)
 
 float turbidityFromVoltage(float v)
 {
-    if (v >= turbidityClearVoltage - TURBIDITY_ZERO_BAND) return 0.0f;
-    if (turbidityVoltsPerNtu <= 0.0f) return 0.0f;
+    if (fabsf(turbidityVoltsPerNtu) < 1e-9f) return 0.0f;
+    // Signed slope: falling sensors have positive V/NTU, rising clones negative.
+    // Values on the "clearer than zero" side clamp to 0 NTU.
     float ntu = (turbidityClearVoltage - v) / turbidityVoltsPerNtu;
+    if (ntu < 0.0f) return 0.0f;
     return constrain(ntu, 0.0f, turbidityMaxNtu);
 }
 
@@ -1651,18 +1654,20 @@ bool handleCalibrationCommand(String cmd)
         if (!turbidityCalibrated) { calSay("CAL FAILED: set the clean-water zero (TURB0) first."); return false; }
         if (value <= 0.0f) { calSay("Usage: CAL TURB <ntu of the standard>"); return false; }
         if (!sampleProbeVoltage(turbidityProbe, v)) return false;
-        float drop = turbidityClearVoltage - v;
-        if (drop < 0.03f)
+        float drop = turbidityClearVoltage - v;   // + if voltage fell, - if it rose
+        if (fabsf(drop) < TURBIDITY_MIN_SPAN_V)
         {
-            calSay(String("CAL FAILED: only ") + String(drop * 1000.0f, 0) +
-                   " mV below clean water (" + String(turbidityClearVoltage, 3) +
-                   " V). Fill the gap between the prongs, wait for the signal to fall, then try again.");
+            calSay(String("CAL FAILED: signal is only ") + String(fabsf(drop) * 1000.0f, 0) +
+                   " mV from clean water (" + String(turbidityClearVoltage, 3) +
+                   " V → " + String(v, 3) + " V). Fill the gap between the prongs, "
+                   "wait for the signal to settle away from clean water, then try again.");
             return false;
         }
         turbidityVoltsPerNtu = drop / value;
         float check = turbidityFromVoltage(v);
-        calDetail = String("Turbidity scale set from the ") + String(value, 0) +
-                    " NTU standard (" + String(v, 3) + " V). Reading is now " +
+        calDetail = String("Turbidity scale set from the ") + String(value, 1) +
+                    " NTU standard (" + String(v, 3) + " V, " +
+                    (drop > 0.0f ? "falling" : "rising") + " curve). Reading is now " +
                     String(check, 1) + " NTU.";
     }
     else if (what == "ORP")

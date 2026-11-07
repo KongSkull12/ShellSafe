@@ -125,14 +125,14 @@
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">1. Clean water</p>
-                    <p class="cal-step-text">Put both the turbidity and EC probes in clear water so the gaps are filled, with no air bubbles. This sets 0 NTU. While EC is dry, turbidity/pH/ORP show 0 like EC; put EC in water too so live readings return while you calibrate.</p>
+                    <p class="cal-step-text">Put the turbidity probe in clear water so the gap between the prongs is filled, with no air bubbles. Press Set 0 NTU. If live Signal later sits above this saved voltage and NTU stays at 0, re-run this step in fresh clear water first.</p>
                 </div>
                 <div class="cal-step-actions">{{ run_button('TURB0', 'Set 0 NTU') }}</div>
             </div>
             <div class="cal-step">
                 <div>
                     <p class="cal-step-title">2. Turbidity standard (optional)</p>
-                    <p class="cal-step-text">Required for accurate NTU in a standard. Put the probe in the bottled standard, wait until Signal falls below the clean-water voltage, then calibrate. Without this step, values above 0 NTU are only an estimate.</p>
+                    <p class="cal-step-text">Required for accurate NTU. Put the probe in a bottled standard (enter the label NTU, e.g. 100 — not the voltage), wait until Signal moves clearly away from the clean-water voltage (it may fall or rise depending on the board), then calibrate.</p>
                 </div>
                 <div class="cal-step-actions">
                     {{ value_field('calTurbValue', 'Standard', 100, 'NTU', 0.1, 4000) }}
