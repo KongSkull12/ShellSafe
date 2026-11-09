@@ -16,7 +16,7 @@ SERVICE_ACCOUNT_KEY_PATH = os.environ.get('FIREBASE_KEY_PATH') or os.path.join(
 
 DATABASE_URL = os.environ.get(
     'FIREBASE_DATABASE_URL',
-    'https://shellsafe-ac058-default-rtdb.firebaseio.com'
+    'https://shelsafe-a5a5c-default-rtdb.asia-southeast1.firebasedatabase.app'
 )
 
 _db_instance = None
