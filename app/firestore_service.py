@@ -6,7 +6,39 @@ Provides abstraction for Firestore operations.
 from firebase_config import get_firestore_client
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+import logging
+import time
 from google.cloud.firestore import Query
+
+_log = logging.getLogger(__name__)
+
+# Unread badge is painted on every logged-in page; cache it so one open
+# dashboard does not stream the whole alerts collection on every request.
+_UNREAD_CACHE_TTL = 45.0
+_unread_cache: Dict[str, Any] = {'count': 0, 'expires': 0.0}
+
+
+def _timestamp_sort_key(value: Any) -> float:
+    """Normalize mixed Firestore / datetime / string timestamps for sorting."""
+    if value is None:
+        return 0.0
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if hasattr(value, 'timestamp') and callable(value.timestamp):
+        try:
+            return float(value.timestamp())
+        except Exception:
+            pass
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # Firestore sometimes stores epoch ms.
+        return float(value) / 1000.0 if value > 1e12 else float(value)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+        except Exception:
+            return 0.0
+    return 0.0
+
 
 class FirestoreService:
     """Service class for Firestore database operations"""
@@ -58,47 +90,68 @@ class FirestoreService:
     
     # ==================== ALERT OPERATIONS ====================
     
-    def get_all_alerts(self, exclude_deleted: bool = True) -> List[Dict]:
+    def get_all_alerts(self, exclude_deleted: bool = True, limit: Optional[int] = None) -> List[Dict]:
         """
-        Retrieve all alerts.
-        
+        Retrieve alerts (newest first).
+
         Args:
             exclude_deleted: If True, exclude deleted alerts
-            
+            limit: Optional max number of alerts to return after filtering
+
         Returns:
             List of alert documents
         """
-        alerts = []
-        for doc in self.db.collection('alerts').stream():
-            data = doc.to_dict()
-            if exclude_deleted and data.get('is_deleted', False):
-                continue
-            alerts.append({'id': doc.id, **data})
-        
-        alerts.sort(key=lambda x: x.get('alert_timestamp', datetime.utcnow()), reverse=True)
+        alerts: List[Dict] = []
+        try:
+            for doc in self.db.collection('alerts').stream():
+                data = doc.to_dict() or {}
+                if exclude_deleted and data.get('is_deleted', False):
+                    continue
+                alerts.append({'id': doc.id, **data})
+        except Exception as exc:
+            _log.warning('get_all_alerts failed: %s', exc)
+            return []
+
+        alerts.sort(key=lambda x: _timestamp_sort_key(x.get('alert_timestamp')), reverse=True)
+        if limit is not None:
+            return alerts[: max(0, int(limit))]
         return alerts
     
     def get_risk_alerts(self) -> List[Dict]:
         """Get all RISK type alerts that are not deleted."""
-        alerts = []
-        for doc in self.db.collection('alerts').stream():
-            data = doc.to_dict()
-            if data.get('is_deleted', False):
-                continue
-            if data.get('alert_type') != 'RISK':
-                continue
-            alerts.append({'id': doc.id, **data})
-        
-        alerts.sort(key=lambda x: x.get('alert_timestamp', datetime.utcnow()), reverse=True)
+        alerts: List[Dict] = []
+        try:
+            for doc in self.db.collection('alerts').stream():
+                data = doc.to_dict() or {}
+                if data.get('is_deleted', False):
+                    continue
+                if data.get('alert_type') != 'RISK':
+                    continue
+                alerts.append({'id': doc.id, **data})
+        except Exception as exc:
+            _log.warning('get_risk_alerts failed: %s', exc)
+            return []
+
+        alerts.sort(key=lambda x: _timestamp_sort_key(x.get('alert_timestamp')), reverse=True)
         return alerts
 
     def get_unread_alert_count(self) -> int:
         """Count non-deleted alerts that have not been acknowledged."""
-        return sum(
-            1
-            for alert in self.get_all_alerts(exclude_deleted=True)
-            if not alert.get('is_acknowledged', False)
-        )
+        now = time.time()
+        if now < float(_unread_cache['expires']):
+            return int(_unread_cache['count'])
+        try:
+            count = sum(
+                1
+                for alert in self.get_all_alerts(exclude_deleted=True)
+                if not alert.get('is_acknowledged', False)
+            )
+        except Exception as exc:
+            _log.warning('get_unread_alert_count failed: %s', exc)
+            count = int(_unread_cache.get('count') or 0)
+        _unread_cache['count'] = count
+        _unread_cache['expires'] = now + _UNREAD_CACHE_TTL
+        return count
 
     def mark_all_alerts_read(self) -> int:
         """Acknowledge all unread alerts. Returns number updated."""
@@ -107,6 +160,7 @@ class FirestoreService:
             if not alert.get('is_acknowledged', False):
                 self.update_alert(alert['id'], {'is_acknowledged': True})
                 updated += 1
+        _unread_cache['expires'] = 0.0
         return updated
 
     def clear_acknowledged_alerts(self) -> int:
@@ -144,6 +198,8 @@ class FirestoreService:
     def update_alert(self, alert_id: str, updates: Dict) -> None:
         """Update an alert document."""
         self.db.collection('alerts').document(alert_id).update(updates)
+        if 'is_acknowledged' in updates or 'is_deleted' in updates:
+            _unread_cache['expires'] = 0.0
     
     def delete_alert(self, alert_id: str, permanent: bool = False) -> None:
         """
@@ -169,14 +225,18 @@ class FirestoreService:
     
     def get_deleted_alerts(self) -> List[Dict]:
         """Get all soft-deleted alerts."""
-        alerts = []
-        for doc in self.db.collection('alerts').stream():
-            data = doc.to_dict()
-            if not data.get('is_deleted', False):
-                continue
-            alerts.append({'id': doc.id, **data})
-        
-        alerts.sort(key=lambda x: x.get('deleted_at', datetime.utcnow()), reverse=True)
+        alerts: List[Dict] = []
+        try:
+            for doc in self.db.collection('alerts').stream():
+                data = doc.to_dict() or {}
+                if not data.get('is_deleted', False):
+                    continue
+                alerts.append({'id': doc.id, **data})
+        except Exception as exc:
+            _log.warning('get_deleted_alerts failed: %s', exc)
+            return []
+
+        alerts.sort(key=lambda x: _timestamp_sort_key(x.get('deleted_at')), reverse=True)
         return alerts
     
     def restore_alert(self, alert_id: str) -> None:

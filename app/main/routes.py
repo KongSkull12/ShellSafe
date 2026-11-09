@@ -60,27 +60,35 @@ def features():
 def about():
     return render_template('about.html', title='About')
 
+def _overview_alerts(limit: int = 4):
+    """Recent alerts for the overview strip; never fail the whole page."""
+    try:
+        db = get_firestore_service()
+        return normalize_alerts(db.get_all_alerts(exclude_deleted=True, limit=limit))
+    except Exception:
+        return []
+
+
 @bp.route('/dashboard/admin')
 @login_required
 @role_required('admin')
 def admin_dashboard():
-    db = get_firestore_service()
-    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:4])
+    # Prefer Firebase minute log (works on Vercel); fall back to in-memory.
+    history = get_history(60) or get_live_history()[-60:]
     return render_template('admin_dashboard.html', title='Overview',
                          live=build_live_payload(),
-                         history=get_live_history()[-60:],
-                         alerts=alerts)
+                         history=history[-60:],
+                         alerts=_overview_alerts())
 
 @bp.route('/dashboard/authority')
 @login_required
 @role_required('authority')
 def authority_dashboard():
-    db = get_firestore_service()
-    alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True)[:4])
+    history = get_history(60) or get_live_history()[-60:]
     return render_template('authority_dashboard.html', title='Overview',
                          live=build_live_payload(),
-                         history=get_live_history()[-60:],
-                         alerts=alerts)
+                         history=history[-60:],
+                         alerts=_overview_alerts())
 
 @bp.route('/dashboard/authority/alerts')
 @login_required
@@ -93,8 +101,12 @@ def authority_alerts():
 @bp.route('/alerts')
 @login_required
 def alerts():
-    db = get_firestore_service()
-    all_alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True))
+    try:
+        db = get_firestore_service()
+        all_alerts = normalize_alerts(db.get_all_alerts(exclude_deleted=True))
+    except Exception:
+        all_alerts = []
+        flash('Alerts could not be loaded right now. Try again in a minute.', 'warning')
     return render_template('alerts.html', title='Alerts', alerts=all_alerts)
 
 @bp.route('/alerts/mark_all_read', methods=['POST'])
