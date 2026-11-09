@@ -1,4 +1,4 @@
-from flask import render_template, redirect, url_for, flash, request
+from flask import render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_user, logout_user, current_user
 from app.auth import bp
 from app.auth.forms import LoginForm
@@ -16,8 +16,14 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         # Query Firestore for user by email
-        user = User.get_by_email(form.email.data)
-        
+        try:
+            user = User.get_by_email(form.email.data)
+        except Exception as e:
+            current_app.logger.warning('Login lookup failed: %s', e)
+            flash('Sign-in is temporarily unavailable. Please try again later.', 'error')
+            return redirect(url_for('auth.login'))
+
+
         if user is None or not user.check_password(form.password.data):
             flash('That email and password do not match an account. Check both and try again.', 'error')
             return redirect(url_for('auth.login'))

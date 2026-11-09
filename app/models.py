@@ -3,6 +3,8 @@ Firestore Models Module
 Defines data models for Firestore collections.
 """
 
+import logging
+
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import login_manager
@@ -116,8 +118,17 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id: str) -> Optional[User]:
-    """Load user by ID for Flask-Login session management."""
-    return User.get_by_id(user_id)
+    """Load user by ID for Flask-Login session management.
+
+    Runs on every request that carries a session cookie, so a Firestore outage
+    or quota error must not 500 the whole site. The visitor is treated as
+    anonymous for this request; the session is kept and recovers on its own.
+    """
+    try:
+        return User.get_by_id(user_id)
+    except Exception as e:
+        logging.getLogger(__name__).warning('Could not load user from Firestore: %s', e)
+        return None
 
 
 class SensorData:
