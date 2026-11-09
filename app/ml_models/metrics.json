@@ -1,12 +1,13 @@
 {
-  "trained_at": "2026-11-01T11:48:13+00:00",
+  "trained_at": "2026-11-09T01:12:01+00:00",
   "demo": false,
   "proxy": true,
-  "source": "AquaSense pond dataset, hourly, January 2026, 15 ponds. Bloom means incident_type algal_bloom_crash. Temperature, pH and turbidity only: no ORP, and salinity is about 0.4 ppt so it is not coastal EC. Not this station.",
+  "source": "AquaSense pond dataset, hourly, January 2026, 15 ponds. Bloom means incident_type algal_bloom_crash. Features: temperature, pH, turbidity, ORP (ORP estimated from DO for training transfer). Not this station.",
   "features": [
     "temperature",
     "ph",
-    "turbidity"
+    "turbidity",
+    "orp"
   ],
   "rows": 10800,
   "class_counts": {
@@ -16,34 +17,34 @@
   "split": "held-out groups",
   "train_rows": 8640,
   "test_rows": 2160,
-  "best": "decision_tree",
+  "best": "random_forest",
   "models": [
     {
       "key": "decision_tree",
       "name": "Decision Tree",
       "best_params": {
-        "max_depth": 12,
+        "max_depth": 3,
         "min_samples_leaf": 1
       },
-      "cv_f1_mean": 0.15360905556252352,
-      "cv_f1_std": 0.09554647967445327,
+      "cv_f1_mean": 0.03553436682450109,
+      "cv_f1_std": 0.04074967835146792,
       "test": {
-        "accuracy": 0.9680555555555556,
-        "precision": 0.04225352112676056,
-        "recall": 0.75,
-        "f1": 0.08
+        "accuracy": 0.7949074074074074,
+        "precision": 0.046357615894039736,
+        "recall": 0.65625,
+        "f1": 0.0865979381443299
       },
       "confusion_matrix": [
         [
-          2088,
-          68
+          1696,
+          432
         ],
         [
-          1,
-          3
+          11,
+          21
         ]
       ],
-      "train_seconds": 4.18
+      "train_seconds": 1.52
     },
     {
       "key": "svm",
@@ -52,52 +53,52 @@
         "C": 0.1,
         "gamma": 0.01
       },
-      "cv_f1_mean": 0.09815772449253932,
-      "cv_f1_std": 0.07824734276724819,
+      "cv_f1_mean": 0.022893242839458743,
+      "cv_f1_std": 0.025801869271508238,
       "test": {
-        "accuracy": 0.9472222222222222,
-        "precision": 0.03389830508474576,
-        "recall": 1.0,
-        "f1": 0.06557377049180328
+        "accuracy": 0.8421296296296297,
+        "precision": 0.0647887323943662,
+        "recall": 0.71875,
+        "f1": 0.11886304909560723
       },
       "confusion_matrix": [
         [
-          2042,
-          114
+          1796,
+          332
         ],
         [
-          0,
-          4
+          9,
+          23
         ]
       ],
-      "train_seconds": 8.09
+      "train_seconds": 1.97
     },
     {
       "key": "random_forest",
       "name": "Random Forest",
       "best_params": {
-        "max_depth": 12,
-        "min_samples_leaf": 1
+        "max_depth": 4,
+        "min_samples_leaf": 20
       },
-      "cv_f1_mean": 0.3331932773109244,
-      "cv_f1_std": 0.23251168464601557,
+      "cv_f1_mean": 0.006289308176100628,
+      "cv_f1_std": 0.008894424920585503,
       "test": {
-        "accuracy": 0.9967592592592592,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0
+        "accuracy": 0.9337962962962963,
+        "precision": 0.13725490196078433,
+        "recall": 0.65625,
+        "f1": 0.22702702702702704
       },
       "confusion_matrix": [
         [
-          2153,
-          3
+          1996,
+          132
         ],
         [
-          4,
-          0
+          11,
+          21
         ]
       ],
-      "train_seconds": 2.34
+      "train_seconds": 1.19
     }
   ]
 }

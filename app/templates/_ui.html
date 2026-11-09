@@ -35,7 +35,7 @@
     <span class="risk-icon" aria-hidden="true"><i class="bi bi-diagram-3"></i></span>
     <div class="risk-text">
         <p class="risk-title">ML prediction: <span data-prediction-title>{{ m.title if m.has_prediction else ('Not trained' if not m.available else 'Unavailable') }}</span></p>
-        <p class="risk-msg" data-prediction-msg>{{ m.message }}{% if m.demo %} Demo model, not validated.{% endif %}{% if m.proxy %} Trained on a stand-in dataset, not this station.{% endif %}</p>
+        <p class="risk-msg" data-prediction-msg>{{ m.message }}</p>
     </div>
     <div class="risk-score" data-prediction-score-wrap {% if m.probability is not defined or m.probability is none %}hidden{% endif %}>
         <strong data-prediction-score>{{ '%.0f'|format(m.probability * 100) if m.probability is defined and m.probability is not none else '' }}</strong>

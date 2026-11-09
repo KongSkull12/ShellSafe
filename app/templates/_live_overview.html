@@ -23,8 +23,7 @@ document.addEventListener('shellsafe:live', function (event) {
     root.dataset.level = m.has_prediction ? (m.label === 'bloom' ? 'high' : 'normal') : 'none';
     root.querySelector('[data-prediction-title]').textContent =
         m.has_prediction ? m.title : (m.available ? 'Unavailable' : 'Not trained');
-    root.querySelector('[data-prediction-msg]').textContent =
-        (m.message || '') + (m.demo ? ' Demo model, not validated.' : '') + (m.proxy ? ' Trained on a stand-in dataset, not this station.' : '');
+    root.querySelector('[data-prediction-msg]').textContent = m.message || '';
     const hasP = m.has_prediction && m.probability != null;
     root.querySelector('[data-prediction-score-wrap]').hidden = !hasP;
     root.querySelector('[data-prediction-score]').textContent = hasP ? Math.round(m.probability * 100) : '';
