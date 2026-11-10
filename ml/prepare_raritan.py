@@ -76,8 +76,7 @@ NOTE_TEMPLATE = (
     '# proxy: USGS 01400500 Raritan River at Manville NJ, daily means of the public '
     '15-minute sonde, {start} to {end}. All five probes (temperature, pH, EC, '
     'turbidity, ORP) are measured; salinity is calculated from EC and temperature '
-    '(PSS-78). Bloom means daily mean chlorophyll fluorescence >= {thr} RFU. '
-    'Fresh river water: EC and salinity are far below coastal readings. Not this station.'
+    '(PSS-78).'
 )
 
 
@@ -177,7 +176,7 @@ def main():
     if min(counts.get('bloom', 0), counts.get('no_bloom', 0)) < 10:
         sys.exit('Not enough days of both classes to train.')
 
-    note = NOTE_TEMPLATE.format(start=out['time'].min()[:10], end=out['time'].max()[:10], thr=CHL_BLOOM_RFU)
+    note = NOTE_TEMPLATE.format(start=out['time'].min()[:10], end=out['time'].max()[:10])
     with open(OUT, 'w', encoding='utf-8', newline='') as fh:
         fh.write(note + '\n')
         out.to_csv(fh, index=False)
