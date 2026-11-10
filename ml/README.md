@@ -67,6 +67,15 @@ python ml/train.py --dataset ml/data/aquasense_bloom.csv --features temperature,
 
 Do not merge this file with the river dataset. The bloom labels are defined differently.
 
+**All five probes (current model).** USGS 01400500, Raritan River at Manville NJ, records every ShellSafe probe (temperature, pH, specific conductance, turbidity, ORP) plus chlorophyll and phycocyanin. `prepare_raritan.py` downloads the 15-minute sonde record from the USGS Water Data API (cached in `ml/data/raw/raritan/`), averages each local day, and calculates salinity from EC and temperature with `app/salinity.py` (PSS-78, the same formula as the web app and firmware). A day is `bloom` when mean chlorophyll fluorescence is at least 1.5 RFU, about three times a typical day. RFU has no fixed µg/L conversion, so the WHO levels do not apply. Whole ISO weeks are held out as groups.
+
+```
+python ml/prepare_raritan.py
+python ml/train.py --dataset ml/data/raritan_bloom.csv --features temperature,ph,ec,turbidity,orp,salinity
+```
+
+This is fresh river water: EC is about 130-1,400 µS/cm and salinity under 1 ppt. Coastal readings sit far above that, so the model's EC and salinity splits do not transfer to the station.
+
 ### Other data sources
 
 Any CSV with the feature columns and a `label` column also works, for example a published labeled water-quality dataset:

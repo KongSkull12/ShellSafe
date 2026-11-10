@@ -1,50 +1,52 @@
 {
-  "trained_at": "2026-11-09T01:12:01+00:00",
+  "trained_at": "2026-11-10T22:18:59+00:00",
   "demo": false,
   "proxy": true,
-  "source": "AquaSense pond dataset, hourly, January 2026, 15 ponds. Bloom means incident_type algal_bloom_crash. Features: temperature, pH, turbidity, ORP (ORP estimated from DO for training transfer). Not this station.",
+  "source": "USGS 01400500 Raritan River at Manville NJ, daily means of the public 15-minute sonde, 2022-04-01 to 2026-11-10. All five probes (temperature, pH, EC, turbidity, ORP) are measured; salinity is calculated from EC and temperature (PSS-78). Bloom means daily mean chlorophyll fluorescence >= 1.5 RFU. Fresh river water: EC and salinity are far below coastal readings. Not this station.",
   "features": [
     "temperature",
     "ph",
+    "ec",
     "turbidity",
-    "orp"
+    "orp",
+    "salinity"
   ],
-  "rows": 10800,
+  "rows": 1313,
   "class_counts": {
-    "bloom": 65,
-    "no_bloom": 10735
+    "bloom": 90,
+    "no_bloom": 1223
   },
   "split": "held-out groups",
-  "train_rows": 8640,
-  "test_rows": 2160,
+  "train_rows": 1059,
+  "test_rows": 254,
   "best": "random_forest",
   "models": [
     {
       "key": "decision_tree",
       "name": "Decision Tree",
       "best_params": {
-        "max_depth": 3,
-        "min_samples_leaf": 1
+        "max_depth": 12,
+        "min_samples_leaf": 5
       },
-      "cv_f1_mean": 0.03553436682450109,
-      "cv_f1_std": 0.04074967835146792,
+      "cv_f1_mean": 0.4472751322751323,
+      "cv_f1_std": 0.0770984235607628,
       "test": {
-        "accuracy": 0.7949074074074074,
-        "precision": 0.046357615894039736,
-        "recall": 0.65625,
-        "f1": 0.0865979381443299
+        "accuracy": 0.8740157480314961,
+        "precision": 0.4897959183673469,
+        "recall": 0.7741935483870968,
+        "f1": 0.6
       },
       "confusion_matrix": [
         [
-          1696,
-          432
+          198,
+          25
         ],
         [
-          11,
-          21
+          7,
+          24
         ]
       ],
-      "train_seconds": 1.52
+      "train_seconds": 1.6
     },
     {
       "key": "svm",
@@ -53,52 +55,52 @@
         "C": 0.1,
         "gamma": 0.01
       },
-      "cv_f1_mean": 0.022893242839458743,
-      "cv_f1_std": 0.025801869271508238,
+      "cv_f1_mean": 0.505232534575079,
+      "cv_f1_std": 0.09766708854884011,
       "test": {
-        "accuracy": 0.8421296296296297,
-        "precision": 0.0647887323943662,
-        "recall": 0.71875,
-        "f1": 0.11886304909560723
+        "accuracy": 0.8700787401574803,
+        "precision": 0.4666666666666667,
+        "recall": 0.45161290322580644,
+        "f1": 0.45901639344262296
       },
       "confusion_matrix": [
         [
-          1796,
-          332
+          207,
+          16
         ],
         [
-          9,
-          23
+          17,
+          14
         ]
       ],
-      "train_seconds": 1.97
+      "train_seconds": 0.16
     },
     {
       "key": "random_forest",
       "name": "Random Forest",
       "best_params": {
-        "max_depth": 4,
-        "min_samples_leaf": 20
+        "max_depth": 8,
+        "min_samples_leaf": 5
       },
-      "cv_f1_mean": 0.006289308176100628,
-      "cv_f1_std": 0.008894424920585503,
+      "cv_f1_mean": 0.5037378713240782,
+      "cv_f1_std": 0.08223478197118653,
       "test": {
-        "accuracy": 0.9337962962962963,
-        "precision": 0.13725490196078433,
-        "recall": 0.65625,
-        "f1": 0.22702702702702704
+        "accuracy": 0.9094488188976378,
+        "precision": 0.6052631578947368,
+        "recall": 0.7419354838709677,
+        "f1": 0.6666666666666666
       },
       "confusion_matrix": [
         [
-          1996,
-          132
+          208,
+          15
         ],
         [
-          11,
-          21
+          8,
+          23
         ]
       ],
-      "train_seconds": 1.19
+      "train_seconds": 0.93
     }
   ]
 }

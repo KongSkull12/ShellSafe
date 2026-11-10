@@ -54,7 +54,8 @@ MODEL_DIR = os.path.join(ROOT, 'app', 'ml_models')
 REPORT_DIR = os.path.join(ROOT, 'ml', 'reports')
 LOCAL_TZ = 'Asia/Manila'
 
-ALL_FEATURES = ['temperature', 'ph', 'turbidity', 'orp', 'ec']
+# salinity is calculated from ec and temperature (app/salinity.py, PSS-78).
+ALL_FEATURES = ['temperature', 'ph', 'turbidity', 'orp', 'ec', 'salinity']
 SEED = 42
 
 # Same limits as the firmware's SMS alerts (shellsafev2.ino). Used only by
@@ -323,7 +324,7 @@ def main():
     parser.add_argument('--proxy', action='store_true',
                         help='labels are a public stand-in, not this station (also set by a # proxy: header)')
     parser.add_argument('--features', default=','.join(ALL_FEATURES),
-                        help='comma-separated model inputs (default: all five probes)')
+                        help='comma-separated model inputs (default: all five probes plus salinity)')
     args = parser.parse_args()
 
     features = [f.strip() for f in args.features.split(',') if f.strip()]

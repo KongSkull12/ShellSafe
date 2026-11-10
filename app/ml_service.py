@@ -27,7 +27,12 @@ FEATURE_LABELS = {
     'turbidity': 'Turbidity',
     'orp': 'ORP',
     'ec': 'EC',
+    'salinity': 'Salinity',
 }
+
+# Salinity is calculated from EC and temperature, so it is only as good as
+# those two probes' calibration.
+_DERIVED_FROM = {'salinity': ('ec', 'temperature')}
 
 _cache: Dict[str, Dict] = {}
 
@@ -128,7 +133,8 @@ def predict_bloom(reading: Optional[Dict]) -> Dict:
     for key in model['features']:
         value = reading.get(key)
         connected = reading.get(f'{key}_connected', value is not None)
-        if value is None or not connected or calibrated.get(key) is False:
+        uncalibrated = any(calibrated.get(k) is False for k in _DERIVED_FROM.get(key, (key,)))
+        if value is None or not connected or uncalibrated:
             missing.append(FEATURE_LABELS.get(key, key))
         else:
             x.append(float(value))

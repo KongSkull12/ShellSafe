@@ -1,7 +1,7 @@
 {% extends "dashboard_base.html" %}
 
 {% macro pct(v) %}{{ '%.0f'|format(v * 100) }}%{% endmacro %}
-{% macro feature_name(key) %}{{ {'temperature':'Temperature','ph':'pH','turbidity':'Turbidity','orp':'ORP','ec':'EC'}.get(key, key) }}{% endmacro %}
+{% macro feature_name(key) %}{{ {'temperature':'Temperature','ph':'pH','turbidity':'Turbidity','orp':'ORP','ec':'EC','salinity':'Salinity'}.get(key, key) }}{% endmacro %}
 
 {% block content %}
 <div class="page-head">
@@ -39,12 +39,20 @@
         <div><dt>Model</dt><dd>{{ best.name }}</dd></div>
         <div><dt>Accuracy</dt><dd>{{ pct(best.test.accuracy) }}</dd></div>
         <div><dt>Bloom catch rate</dt><dd>{{ pct(best.test.recall) }}</dd></div>
+        <div><dt>Bloom alerts that were real</dt><dd>{{ pct(best.test.precision) }}</dd></div>
         <div><dt>Overall score</dt><dd>{{ pct(best.test.f1) }}</dd></div>
         <div>
             <dt>Inputs</dt>
             <dd>{% for f in metrics.features %}{{ feature_name(f) }}{% if not loop.last %}, {% endif %}{% endfor %}</dd>
         </div>
+        <div><dt>Trained on</dt><dd>{{ metrics.source }}</dd></div>
     </dl>
+    {% if metrics.proxy or metrics.demo %}
+    <p class="muted" style="margin-top: 12px;">
+        {% if metrics.demo %}Demo model: its labels came from the alert thresholds, so these scores are not real results.
+        {% else %}These scores come from a public stand-in dataset, not this station's water. Retrain on this station's field observations before relying on them.{% endif %}
+    </p>
+    {% endif %}
 </section>
 
 <section class="panel" aria-labelledby="cardsTitle">
