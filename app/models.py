@@ -5,6 +5,7 @@ Defines data models for Firestore collections.
 
 import logging
 
+from flask import session
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import login_manager
@@ -124,8 +125,17 @@ def load_user(user_id: str) -> Optional[User]:
     or quota error must not 500 the whole site. The visitor is treated as
     anonymous for this request; the session is kept and recovers on its own.
     """
+    # The live view polls every 5 s, so a Firestore read here would cost
+    # ~17K reads a day per open tab. The signed session cookie keeps the
+    # user's email and role after the first lookup instead.
+    cached = session.get('_user_cache')
+    if isinstance(cached, dict) and cached.get('id') == user_id:
+        return User(email=cached.get('email'), role=cached.get('role', 'authority'), user_id=user_id)
     try:
-        return User.get_by_id(user_id)
+        user = User.get_by_id(user_id)
+        if user is not None:
+            session['_user_cache'] = {'id': user.id, 'email': user.email, 'role': user.role}
+        return user
     except Exception as e:
         logging.getLogger(__name__).warning('Could not load user from Firestore: %s', e)
         return None
