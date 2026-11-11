@@ -377,15 +377,13 @@ def firmware_download(kind):
 @login_required
 @role_required('admin')
 def threshold_settings():
-    """Admin page to configure Normal / Warning / Alert bands per sensor."""
+    """Admin page to set each sensor's normal range and alert limits."""
     if request.method == 'POST':
         submitted = {}
         for key in SENSOR_ORDER:
             submitted[key] = {
                 'normal_min': request.form.get(f'{key}_normal_min'),
                 'normal_max': request.form.get(f'{key}_normal_max'),
-                'warning_min': request.form.get(f'{key}_warning_min'),
-                'warning_max': request.form.get(f'{key}_warning_max'),
                 'alert_min': request.form.get(f'{key}_alert_min'),
                 'alert_max': request.form.get(f'{key}_alert_max'),
             }

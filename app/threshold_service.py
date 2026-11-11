@@ -128,30 +128,29 @@ def get_thresholds(use_cache: bool = True) -> Dict[str, Dict[str, Any]]:
 
 
 _BAND_ORDER = (
-    ('alert_min', 'Alert min'),
-    ('warning_min', 'Warning min'),
-    ('normal_min', 'Normal min'),
-    ('normal_max', 'Normal max'),
-    ('warning_max', 'Warning max'),
-    ('alert_max', 'Alert max'),
+    ('alert_min', 'Alert below'),
+    ('normal_min', 'Normal from'),
+    ('normal_max', 'Normal to'),
+    ('alert_max', 'Alert above'),
 )
 
 
 def validate_bands(key: str, cfg: Dict[str, Any]) -> None:
     """
-    Bands must nest: Alert min <= Warning min <= Normal min <= Normal max
-    <= Warning max <= Alert max (empty limits are skipped). classify_value
-    checks the alert edges first, so an Alert min above the normal range
-    would flag every normal reading as High Risk.
+    Limits must run low to high: Alert below <= Normal from <= Normal to
+    <= Alert above (empty alert limits are skipped). classify_value checks
+    the alert edges first, so an alert limit inside the normal range would
+    flag normal readings as High Risk.
     """
+    if cfg.get('normal_min') is None or cfg.get('normal_max') is None:
+        raise ValueError(f"{DEFAULT_THRESHOLDS[key]['label']}: fill in both ends of the normal range.")
     label = DEFAULT_THRESHOLDS[key]['label']
     set_limits = [(name, cfg.get(field)) for field, name in _BAND_ORDER
                   if cfg.get(field) is not None]
     for (low_name, low), (high_name, high) in zip(set_limits, set_limits[1:]):
         if low > high:
             raise ValueError(
-                f'{label}: {low_name} ({low:g}) must not be greater than {high_name} ({high:g}). '
-                'The Normal band must sit inside the Warning band, and the Warning band inside the Alert limits.'
+                f'{label}: {low_name} ({low:g}) must not be higher than {high_name} ({high:g}).'
             )
 
 
@@ -160,6 +159,10 @@ def set_thresholds(sensors: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, An
     cleaned = {}
     for key in SENSOR_ORDER:
         cleaned[key] = _merge_sensor(key, sensors.get(key) if isinstance(sensors, dict) else None)
+        # Warning is simply "outside normal, inside the alert limits", so the
+        # stored warning band mirrors the normal range. Kept for older readers.
+        cleaned[key]['warning_min'] = cleaned[key]['normal_min']
+        cleaned[key]['warning_max'] = cleaned[key]['normal_max']
         validate_bands(key, cleaned[key])
 
     payload = {
@@ -188,7 +191,7 @@ def thresholds_for_form() -> List[Dict[str, Any]]:
 def classify_value(sensor_key: str, value: Optional[float], thresholds: Optional[Dict] = None) -> str:
     """
     Return 'normal' | 'warning' | 'high' | 'unknown'.
-    Alert edges win over warning; warning wins over normal.
+    Past an alert limit is 'high'; outside the normal range is 'warning'.
     """
     if value is None:
         return 'unknown'
@@ -203,13 +206,6 @@ def classify_value(sensor_key: str, value: Optional[float], thresholds: Optional
         return 'high'
     if alert_max is not None and value > alert_max:
         return 'high'
-
-    warn_min = cfg.get('warning_min')
-    warn_max = cfg.get('warning_max')
-    if warn_min is not None and value < warn_min:
-        return 'warning'
-    if warn_max is not None and value > warn_max:
-        return 'warning'
 
     normal_min = cfg.get('normal_min')
     normal_max = cfg.get('normal_max')

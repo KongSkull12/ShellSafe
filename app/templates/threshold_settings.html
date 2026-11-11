@@ -1,56 +1,140 @@
 {% extends "dashboard_base.html" %}
 {% from "_ui.html" import flashes with context %}
 
-{% macro num(sensor, name, optional=false) %}
+{% macro num(sensor, name, label, placeholder='') %}
 {% set value = sensor[name] %}
-<div class="field">
-    <label for="{{ sensor.key }}_{{ name }}">{{ 'Min' if name.endswith('min') else 'Max' }}</label>
-    <input class="input" type="number" step="any" inputmode="decimal" id="{{ sensor.key }}_{{ name }}" name="{{ sensor.key }}_{{ name }}"
-           value="{{ value if value is not none else '' }}" {% if optional %}placeholder="None"{% endif %}>
-</div>
+<label class="th-field th-{{ 'alert' if name.startswith('alert') else 'normal' }}">
+    <span>{{ label }}</span>
+    <input class="input" type="number" step="any" inputmode="decimal"
+           name="{{ sensor.key }}_{{ name }}" data-limit="{{ name }}"
+           value="{{ value if value is not none else '' }}" placeholder="{{ placeholder }}">
+</label>
 {% endmacro %}
 
 {% block content %}
 <div class="page-head">
     <div class="page-head-text">
         <h1>Thresholds</h1>
-        <p>Bands that decide each probe's risk level on the dashboard and when in-app alerts are raised. A reading outside the alert band is Alert, outside the warning band is Warning, otherwise Normal. Leave an alert limit empty if that side doesn't apply.</p>
+        <p>Set the normal range for each probe, and the limits that raise an alert.</p>
     </div>
 </div>
 
 {{ flashes() }}
 
-<form method="POST" action="{{ url_for('main.threshold_settings') }}" style="display: grid; gap: 20px;">
-    {% for sensor in sensors %}
-    {% set d = defaults[sensor.key] %}
-    <section class="panel" aria-labelledby="t-{{ sensor.key }}">
-        <div class="panel-head">
-            <h2 id="t-{{ sensor.key }}">{{ sensor.label }}{% if sensor.unit and sensor.unit.strip() %} <span style="color: var(--text-3); font-weight: 500;">{{ sensor.unit.strip() }}</span>{% endif %}</h2>
-            <p>Default normal {{ d.normal_min if d.normal_min is not none else '–' }} to {{ d.normal_max if d.normal_max is not none else '–' }}</p>
+<div class="th-legend" aria-hidden="true">
+    <span><i class="th-dot is-ok"></i> Normal: inside the normal range</span>
+    <span><i class="th-dot is-warn"></i> Warning: outside normal, but within the alert limits</span>
+    <span><i class="th-dot is-bad"></i> Alert: past an alert limit</span>
+</div>
+
+<form method="POST" action="{{ url_for('main.threshold_settings') }}" id="threshold-form">
+    <section class="panel th-panel">
+        {% for sensor in sensors %}
+        {% set d = defaults[sensor.key] %}
+        {% set unit = sensor.unit.strip() if sensor.unit else '' %}
+        <div class="th-row" data-sensor data-unit="{{ unit }}"
+             data-defaults='{{ {"alert_min": d.alert_min, "normal_min": d.normal_min, "normal_max": d.normal_max, "alert_max": d.alert_max} | tojson }}'>
+            <div class="th-name">
+                <strong>{{ sensor.label }}</strong>
+                {% if unit %}<span>{{ unit }}</span>{% endif %}
+                <button type="button" class="th-reset" data-reset>Reset</button>
+            </div>
+            <div class="th-inputs">
+                {{ num(sensor, 'alert_min', 'Alert below', 'No limit') }}
+                {{ num(sensor, 'normal_min', 'Normal from') }}
+                {{ num(sensor, 'normal_max', 'Normal to') }}
+                {{ num(sensor, 'alert_max', 'Alert above', 'No limit') }}
+            </div>
+            <div class="th-strip" aria-hidden="true">
+                <i class="is-bad" data-seg="low-alert"></i>
+                <i class="is-warn" data-seg="low-warn"></i>
+                <i class="is-ok"></i>
+                <i class="is-warn" data-seg="high-warn"></i>
+                <i class="is-bad" data-seg="high-alert"></i>
+            </div>
+            <p class="th-summary" data-summary></p>
         </div>
-        <div class="band-grid">
-            <div class="band">
-                <div class="band-title">Normal</div>
-                <div class="band-pair">{{ num(sensor, 'normal_min') }}{{ num(sensor, 'normal_max') }}</div>
-            </div>
-            <div class="band band-warning">
-                <div class="band-title">Warning</div>
-                <div class="band-pair">{{ num(sensor, 'warning_min') }}{{ num(sensor, 'warning_max') }}</div>
-            </div>
-            <div class="band band-alert">
-                <div class="band-title">Alert</div>
-                <div class="band-pair">{{ num(sensor, 'alert_min', true) }}{{ num(sensor, 'alert_max', true) }}</div>
-            </div>
-        </div>
+        {% endfor %}
     </section>
-    {% endfor %}
 
     <div class="save-bar">
-        <p>Changes apply to the dashboard and in-app alerts right away. Device SMS limits stay in firmware.</p>
+        <p>Changes apply to the dashboard and in-app alerts right away. SMS alert limits are set in the device firmware.</p>
         <div class="actions">
             <a href="{{ url_for('main.admin_dashboard') }}" class="btn btn-ghost">Cancel</a>
             <button type="submit" class="btn btn-primary"><i class="bi bi-check2" aria-hidden="true"></i> Save thresholds</button>
         </div>
     </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const ORDER = ['alert_min', 'normal_min', 'normal_max', 'alert_max'];
+    const NAMES = { alert_min: 'Alert below', normal_min: 'Normal from', normal_max: 'Normal to', alert_max: 'Alert above' };
+    const fmt = (v, unit) => (Math.round(v * 100) / 100) + (unit ? ' ' + unit : '');
+
+    function read(row) {
+        const out = {};
+        ORDER.forEach(function (k) {
+            const raw = row.querySelector('[data-limit="' + k + '"]').value.trim();
+            out[k] = raw === '' ? null : Number(raw);
+        });
+        return out;
+    }
+
+    // Limits must run low to high: Alert below <= Normal from <= Normal to <= Alert above.
+    function problem(v) {
+        if (v.normal_min == null || v.normal_max == null) return 'Fill in both ends of the normal range.';
+        const set = ORDER.filter(function (k) { return v[k] != null; });
+        for (let i = 1; i < set.length; i++) {
+            if (v[set[i - 1]] > v[set[i]]) return NAMES[set[i - 1]] + ' must not be higher than ' + NAMES[set[i]] + '.';
+        }
+        return '';
+    }
+
+    function update(row) {
+        const v = read(row);
+        const unit = row.dataset.unit;
+        const err = problem(v);
+        const summary = row.querySelector('[data-summary]');
+        row.classList.toggle('has-error', !!err);
+        ORDER.forEach(function (k) {
+            row.querySelector('[data-limit="' + k + '"]').setAttribute('aria-invalid', err ? 'true' : 'false');
+        });
+        row.querySelector('[data-seg="low-alert"]').hidden = v.alert_min == null;
+        row.querySelector('[data-seg="high-alert"]').hidden = v.alert_max == null;
+        row.querySelector('[data-seg="low-warn"]').hidden = v.alert_min != null && v.alert_min === v.normal_min;
+        row.querySelector('[data-seg="high-warn"]').hidden = v.alert_max != null && v.alert_max === v.normal_max;
+        if (err) { summary.textContent = err; return; }
+        const parts = ['Normal ' + fmt(v.normal_min, '') + ' to ' + fmt(v.normal_max, unit)];
+        const alerts = [];
+        if (v.alert_min != null) alerts.push('below ' + fmt(v.alert_min, unit));
+        if (v.alert_max != null) alerts.push('above ' + fmt(v.alert_max, unit));
+        parts.push(alerts.length ? 'Alert ' + alerts.join(' or ') : 'Never raises an alert');
+        summary.textContent = parts.join(' · ') + '. Anything else is Warning.';
+    }
+
+    document.querySelectorAll('[data-sensor]').forEach(function (row) {
+        row.addEventListener('input', function () { update(row); });
+        row.querySelector('[data-reset]').addEventListener('click', function () {
+            const d = JSON.parse(row.dataset.defaults);
+            ORDER.forEach(function (k) {
+                row.querySelector('[data-limit="' + k + '"]').value = d[k] == null ? '' : d[k];
+            });
+            update(row);
+        });
+        update(row);
+    });
+
+    document.getElementById('threshold-form').addEventListener('submit', function (e) {
+        const bad = document.querySelector('[data-sensor].has-error');
+        if (bad) {
+            e.preventDefault();
+            bad.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            bad.querySelector('input').focus({ preventScroll: true });
+        }
+    });
+})();
+</script>
 {% endblock %}

@@ -15,7 +15,7 @@
     const KEYS = Object.keys(SENSORS);
     const LINE = '#2f5fe0';
     const BAND = 'rgba(34, 160, 90, 0.07)';
-    const WARN = 'rgba(190, 120, 20, 0.55)';
+    const ALERT = 'rgba(205, 60, 45, 0.55)';
     const GRID = '#eef0f3';
     const TICK = '#7a818c';
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -63,7 +63,7 @@
         store.listeners.forEach(function (fn) { fn(event.detail.payload); });
     });
 
-    // Shade the normal band and dash the warning limits behind the line.
+    // Shade the normal band and dash the alert limits behind the line.
     const bandPlugin = {
         id: 'shellsafeBand',
         beforeDatasetsDraw(chart, _args, opts) {
@@ -82,10 +82,10 @@
                     ctx.fillRect(chartArea.left, t, chartArea.right - chartArea.left, b - t);
                 }
             }
-            ctx.strokeStyle = WARN;
+            ctx.strokeStyle = ALERT;
             ctx.setLineDash([3, 4]);
             ctx.lineWidth = 1;
-            [band.warnMin, band.warnMax].forEach(function (v) {
+            [band.alertMin, band.alertMax].forEach(function (v) {
                 if (v == null) return;
                 const py = y.getPixelForValue(v);
                 if (py < chartArea.top || py > chartArea.bottom) return;
@@ -120,7 +120,7 @@
     function bandFor(payload, key) {
         const cfg = payload?.risk_assessment?.thresholds?.[key];
         if (!cfg) return null;
-        return { min: cfg.normal_min, max: cfg.normal_max, warnMin: cfg.warning_min, warnMax: cfg.warning_max };
+        return { min: cfg.normal_min, max: cfg.normal_max, alertMin: cfg.alert_min, alertMax: cfg.alert_max };
     }
 
     function fillGradient(ctx, area) {
