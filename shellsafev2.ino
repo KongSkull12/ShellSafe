@@ -86,7 +86,7 @@ String calDetail;   // outcome of the last CAL step, shown on the web page
 // ============================================================
 // WIFI / FIREBASE
 // ============================================================
-const char* firebaseHost = "shelsafe-a5a5c-default-rtdb.asia-southeast1.firebasedatabase.app";
+const char* firebaseHost = "shellsafe-ac058-default-rtdb.firebaseio.com";
 const char* firebasePath = "/device_data.json";
 
 // ============================================================
