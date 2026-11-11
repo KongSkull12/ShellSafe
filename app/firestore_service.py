@@ -271,7 +271,8 @@ class FirestoreService:
         return reports
     
     def create_report(self, report_name: str, report_type: str, file_path: str = None, 
-                      file_size: str = '2.4 MB', generated_by: str = 'System Auto') -> str:
+                      file_size: str = '2.4 MB', generated_by: str = 'System Auto',
+                      summary: Optional[Dict] = None) -> str:
         """
         Create a new report.
         
@@ -294,8 +295,14 @@ class FirestoreService:
             'generated_by': generated_by,
             'status': 'active'
         }
+        if summary is not None:
+            report_data['summary'] = summary
         _, doc_ref = self.db.collection('reports').add(report_data)
         return doc_ref.id
+
+    def get_report(self, report_id: str) -> Optional[Dict]:
+        doc = self.db.collection('reports').document(report_id).get()
+        return {'id': doc.id, **doc.to_dict()} if doc.exists else None
     
     def update_report(self, report_id: str, updates: Dict) -> None:
         """Update a report document."""

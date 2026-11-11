@@ -5,10 +5,19 @@
 <div class="page-head">
     <div class="page-head-text">
         <h1>Monitoring reports</h1>
-        <p>Reports saved to Firestore. Deleted reports can be restored from the trash.</p>
+        <p>Summaries of water quality, alerts and bloom risk. Deleted reports can be restored from the trash.</p>
     </div>
     <div class="actions">
         <a href="{{ url_for('main.deleted_reports_view') }}" class="btn btn-quiet"><i class="bi bi-trash3" aria-hidden="true"></i> Deleted reports</a>
+        <form action="{{ url_for('main.generate_report') }}" method="POST" style="display: flex; gap: 8px; align-items: center;">
+            <label for="reportPeriod" class="visually-hidden">Report period</label>
+            <select class="select" id="reportPeriod" name="period">
+                <option value="1">Last 24 hours</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+            </select>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-file-earmark-plus" aria-hidden="true"></i> Generate report</button>
+        </form>
     </div>
 </div>
 
@@ -41,7 +50,7 @@
                 {% for report in reports %}
                 {% set rid = report.id or report.report_id %}
                 <tr data-search="{{ (report.report_name ~ ' ' ~ (report.generated_by or ''))|lower }}" data-type="{{ (report.report_type or '')|lower }}">
-                    <td class="strong">{{ report.report_name }}</td>
+                    <td class="strong"><a href="{{ url_for('main.view_report', report_id=rid) }}">{{ report.report_name }}</a></td>
                     <td><span class="tag">{{ report.report_type }}</span></td>
                     <td class="muted">{{ report.generated_date|localtime if report.generated_date else '—' }}</td>
                     <td class="muted">{{ report.file_size or '—' }}</td>

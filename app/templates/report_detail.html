@@ -1,0 +1,139 @@
+{% extends "dashboard_base.html" %}
+{% from "_ui.html" import flashes with context %}
+
+{% macro val(v, unit) %}{% if v is none %}—{% else %}{{ v }}{% if unit %} {{ unit }}{% endif %}{% endif %}{% endmacro %}
+{% macro pct(v) %}{% if v is none %}—{% else %}{{ v }}%{% endif %}{% endmacro %}
+
+{% block styles %}
+<style>
+    .report-findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .report-findings li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.5; }
+    .report-findings .tag { flex: 0 0 auto; }
+    .report-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    @media print {
+        .sidebar, .topbar, .no-print { display: none !important; }
+        .main { margin: 0 !important; padding: 0 !important; }
+        .panel { break-inside: avoid; box-shadow: none !important; }
+        body { background: #fff !important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>{{ report.report_name }}</h1>
+        <p>{{ report.report_type }} report · {{ summary.start_label or '—' }} to {{ summary.end_label or '—' }} (Philippine time)
+            · generated {{ report.generated_date|localtime if report.generated_date else '—' }} by {{ report.generated_by or '—' }}</p>
+    </div>
+    <div class="actions no-print">
+        <a href="{{ url_for('main.reports') }}" class="btn btn-quiet"><i class="bi bi-arrow-left" aria-hidden="true"></i> All reports</a>
+        <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-download" aria-hidden="true"></i> Save as PDF</button>
+    </div>
+</div>
+{{ flashes() }}
+
+{% if not summary %}
+<section class="panel">
+    <div class="empty">
+        <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+        <strong>No details saved</strong>
+        <span>This report was created before reports stored their data.</span>
+    </div>
+</section>
+{% else %}
+{% set cov = summary.coverage %}
+{% set risk = summary.risk %}
+{% set alerts = summary.alerts %}
+
+<section class="panel" aria-labelledby="findTitle">
+    <div class="panel-head"><div><h2 id="findTitle">Key findings</h2><p>The most important points from this period.</p></div></div>
+    <ul class="report-findings">
+        {% for f in summary.findings %}
+        <li>
+            <span class="tag {{ 'tag-high' if f.level == 'high' else 'tag-warning' if f.level == 'warning' else 'tag-ok' }}">
+                {{ 'Action' if f.level == 'high' else 'Check' if f.level == 'warning' else 'OK' }}</span>
+            <span>{{ f.text }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+
+<section class="panel" aria-labelledby="sumTitle">
+    <div class="panel-head"><div><h2 id="sumTitle">At a glance</h2></div></div>
+    <dl class="kv">
+        <div><dt>Readings received</dt><dd>{{ '{:,}'.format(cov.readings) }} of about {{ '{:,}'.format(cov.expected) }} ({{ cov.pct }}%)</dd></div>
+        <div><dt>Longest silence</dt><dd>{{ cov.longest_gap }} from {{ cov.longest_gap_from }}</dd></div>
+        <div><dt>Alerts raised</dt><dd>{{ alerts.total }}</dd></div>
+        <div><dt>Hours at alert level</dt><dd>{{ risk.risk_high }} of {{ risk.hours }}</dd></div>
+        {% if risk.model_name %}
+        <div><dt>Bloom predicted ({{ risk.model_name }})</dt><dd>{{ risk.bloom_hours }} of {{ risk.model_hours }} hours{% if risk.peak_probability is not none %} · peak {{ (risk.peak_probability * 100)|round|int }}%{% endif %}</dd></div>
+        {% endif %}
+    </dl>
+</section>
+
+<section class="panel" aria-labelledby="sensTitle">
+    <div class="panel-head"><div><h2 id="sensTitle">Water quality by probe</h2>
+        <p>Averages leave out impossible values (sensor faults). Time in range uses your Thresholds settings.</p></div></div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead><tr>
+                <th>Probe</th><th class="num">Average</th><th class="num">Lowest</th><th class="num">Highest</th>
+                <th class="num">Normal</th><th class="num">Warning</th><th class="num">Alert</th><th class="num">Faulty readings</th>
+            </tr></thead>
+            <tbody>
+                {% for s in summary.sensors %}
+                <tr>
+                    <td class="strong">{{ s.label }}</td>
+                    <td class="num">{{ val(s.avg, s.unit) }}</td>
+                    <td class="num">{{ val(s.min, s.unit) }}</td>
+                    <td class="num">{{ val(s.max, s.unit) }}</td>
+                    <td class="num">{{ pct(s.normal_pct) }}</td>
+                    <td class="num">{{ pct(s.warning_pct) }}</td>
+                    <td class="num {{ 'strong' if s.alert_pct }}">{{ pct(s.alert_pct) }}</td>
+                    <td class="num">{% if s.readings %}{{ s.faulty }} ({{ s.faulty_pct }}%){% else %}No data{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="report-grid">
+    <section class="panel" aria-labelledby="riskTitle" style="margin: 0;">
+        <div class="panel-head"><div><h2 id="riskTitle">Bloom risk by hour</h2><p>Worst probe each hour, using hourly averages.</p></div></div>
+        <dl class="kv">
+            <div><dt>Normal</dt><dd>{{ risk.risk_normal }} hours</dd></div>
+            <div><dt>Warning</dt><dd>{{ risk.risk_warning }} hours</dd></div>
+            <div><dt>Alert level</dt><dd>{{ risk.risk_high }} hours</dd></div>
+            {% if risk.peak_at %}<div><dt>Highest bloom probability</dt><dd>{{ risk.peak_at }}</dd></div>{% endif %}
+        </dl>
+    </section>
+    <section class="panel" aria-labelledby="alTitle" style="margin: 0;">
+        <div class="panel-head"><div><h2 id="alTitle">Alerts by source</h2></div></div>
+        {% if alerts.by_source %}
+        <dl class="kv">
+            {% for source, n in alerts.by_source.items() %}<div><dt>{{ source }}</dt><dd>{{ n }}</dd></div>{% endfor %}
+            {% for level, n in alerts.by_level.items() %}<div><dt>{{ level }} level</dt><dd>{{ n }}</dd></div>{% endfor %}
+        </dl>
+        {% else %}<p class="muted">No alerts in this period.</p>{% endif %}
+    </section>
+</div>
+
+{% if alerts.recent %}
+<section class="panel" aria-labelledby="recentTitle" style="margin-top: 16px;">
+    <div class="panel-head"><div><h2 id="recentTitle">Latest alerts</h2><p>Up to 10, newest first.</p></div></div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
+            <tbody>
+                {% for a in alerts.recent %}
+                <tr><td class="muted">{{ a.at }}</td><td><span class="tag {{ 'tag-high' if a.level in ('Critical', 'High') else 'tag-warning' }}">{{ a.level }}</span></td><td>{{ a.message }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}
